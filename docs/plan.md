@@ -62,8 +62,7 @@ Design a runtime-agnostic, minimal-deps, S3-compatible client with strong defaul
 ### Configuration model
 
 - S3Client config:
-  - region: string
-  - endpoint: string | undefined (auto-resolve aws based on region if not provided)
+  - endpoint: string
   - credentials: { accessKeyId, secretAccessKey, sessionToken? } | provider fn
   - bucketStyle: "virtual" | "path" (phase 2)
   - defaultBucket?: string
@@ -82,7 +81,7 @@ Design a runtime-agnostic, minimal-deps, S3-compatible client with strong defaul
 ### Internal modules
 
 - Endpoint resolver:
-  - Builds request URL from endpoint, region, bucket, key, style (virtual/path).
+  - Builds request URL from endpoint, bucket, key, style (virtual/path).
   - Encodes keys correctly (RFC 3986); keep “/” as path separator.
 - SigV4 signer:
   - Canonical request builder: method, canonical URI, canonical query, canonical headers, signed headers, payload hash.
@@ -182,7 +181,6 @@ Design a runtime-agnostic, minimal-deps, S3-compatible client with strong defaul
 
 - ETag ≠ MD5 for multipart; document clearly
 - Virtual-hosted style may be unsupported for non-DNS-compliant buckets; add path-style fallback (phase 2)
-- Some providers have slightly different region strings or endpoints; keep endpoint customizable, don’t hardcode AWS domains unless endpoint absent
 - Unsigned payload for presigned URLs is widely accepted for GET/HEAD and PUT presigns
 
 ### Security considerations
@@ -230,8 +228,7 @@ export type CredentialsProvider = () => Promise<Credentials>;
 export type BucketStyle = "virtual" | "path";
 
 export interface S3ClientConfig {
-  region: string;
-  endpoint?: string; // e.g. https://s3.eu-central-1.amazonaws.com or provider host
+  endpoint: string; // e.g. https://s3.eu-central-1.amazonaws.com or provider host
   credentials: Credentials | CredentialsProvider;
   defaultBucket?: string;
   bucketStyle?: BucketStyle; // default 'virtual'
@@ -267,7 +264,6 @@ export interface PutObjectParams {
   contentType?: string | false;
   cacheControl?: string;
   contentDisposition?: string;
-  metadata?: Record<string, string>; // x-amz-meta-*
   headers?: HeadersInit;
   signal?: AbortSignal;
 }
@@ -293,7 +289,7 @@ export interface MultipartInitParams {
   bucket?: string;
   key: string;
   contentType?: string | false;
-  metadata?: Record<string, string>;
+  headers?: HeadersInit;
 }
 
 export interface UploadPartParams {
@@ -354,19 +350,6 @@ export interface S3Client {
   completeMultipart(params: CompleteMultipartParams): Promise<Response>;
   abortMultipart(params: AbortMultipartParams): Promise<void>;
 }
-
-// Optional body helpers kept separate to avoid implicit buffering:
-export const Body = {
-  async text(res: Response) {
-    return await res.text();
-  },
-  async json<T = unknown>(res: Response) {
-    return (await res.json()) as T;
-  },
-  async arrayBuffer(res: Response) {
-    return await res.arrayBuffer();
-  },
-};
 ```
 
 ### Project structure
