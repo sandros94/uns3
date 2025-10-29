@@ -1,0 +1,54 @@
+{
+  "name": "uns3",
+  "version": "0.0.0",
+  "description": "Runtime agnostic S3 client.",
+  "repository": "sandros94/uns3",
+  "license": "MIT",
+  "sideEffects": false,
+  "type": "module",
+  "author": {
+    "name": "Sandro Circi",
+    "email": "sandro.circi@digitoolmedia.com"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    }
+  },
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "unbuild",
+    "dev": "npx --yes listhen -w ./playground/main.ts",
+    "dev:v2": "node --experimental-strip-types --watch ./playground/main-v2.ts",
+    "lint": "eslint . && prettier -c .",
+    "lint:fix": "automd && eslint . --fix && prettier -w .",
+    "prepack": "pnpm build",
+    "release": "pnpm test && pnpm prepack && changelogen --release --push --publish",
+    "test": "pnpm lint && pnpm test:types && vitest run --slowTestThreshold=500",
+    "test:coverage": "pnpm lint && pnpm test:types && vitest run --coverage --slowTestThreshold=500",
+    "test:types": "tsc --noEmit --skipLibCheck",
+    "bench": "vitest bench --run"
+  },
+  "resolutions": {
+    "uns3": "link:."
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@vitest/coverage-v8": "^4.0.4",
+    "automd": "^0.4.2",
+    "changelogen": "^0.6.2",
+    "eslint": "^9.38.0",
+    "eslint-config-unjs": "^0.5.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "unbuild": "^3.6.1",
+    "vitest": "^4.0.4"
+  },
+  "packageManager": "pnpm@10.19.0"
+}
