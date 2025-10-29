@@ -25,13 +25,12 @@
   "scripts": {
     "build": "unbuild",
     "dev": "npx --yes listhen -w ./playground/main.ts",
-    "dev:v2": "node --experimental-strip-types --watch ./playground/main-v2.ts",
     "lint": "eslint . && prettier -c .",
     "lint:fix": "automd && eslint . --fix && prettier -w .",
     "prepack": "pnpm build",
     "release": "pnpm test && pnpm prepack && changelogen --release --push --publish",
-    "test": "pnpm lint && pnpm test:types && vitest run --slowTestThreshold=500",
-    "test:coverage": "pnpm lint && pnpm test:types && vitest run --coverage --slowTestThreshold=500",
+    "test": "pnpm lint && pnpm test:types && vitest run",
+    "test:coverage": "pnpm lint && pnpm test:types && vitest run --coverage",
     "test:types": "tsc --noEmit --skipLibCheck",
     "bench": "vitest bench --run"
   },
