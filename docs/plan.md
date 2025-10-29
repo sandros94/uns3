@@ -27,7 +27,6 @@ Design a runtime-agnostic, minimal-deps, S3-compatible client with strong defaul
     - retriable flag suggestion (initially basic; improved in phase 2).
 - Strict streaming:
   - Expose raw Response/ReadableStream for GET/PUT when appropriate.
-  - Helpers for `.text()`, `.json()`, `.arrayBuffer()` that operate on Response bodies explicitly, not implicitly.
 
 ### Supported operations (target parity with S3 REST)
 
@@ -55,7 +54,6 @@ Design a runtime-agnostic, minimal-deps, S3-compatible client with strong defaul
 ### API shape (methods exposed by master class)
 
 - get, head, put, del, list, getSignedUrl
-- streamGet (returns Response or ReadableStream plus headers)
 - multipart: initiate, uploadPart, complete, abort
 - Helpers: decode (text/json/arrayBuffer), contentTypeForKey
 
@@ -114,7 +112,6 @@ Design a runtime-agnostic, minimal-deps, S3-compatible client with strong defaul
   - get, head, put, del
   - list (ListObjectsV2 basic)
   - getSignedUrl (GET/PUT/HEAD)
-  - streamGet (just returns Response or its body stream)
 - Defaults:
   - content-type: resolve via resolver (`mrmime`) when missing and method is PUT
   - do not compute checksums by default
@@ -317,7 +314,6 @@ export interface AbortMultipartParams {
 
 export interface S3Client {
   get(params: GetObjectParams): Promise<Response>;
-  streamGet(params: GetObjectParams): Promise<ReadableStream<Uint8Array>>; // or return Response and user reads .body
   head(params: {
     bucket?: string;
     key: string;
