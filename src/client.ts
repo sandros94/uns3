@@ -86,16 +86,6 @@ export class S3Client {
   }
 
   /**
-   * Performs a GET Object request but leaves response streaming decisions to
-   * the caller. This mirrors {@link get} yet clearly signals streaming usage.
-   *
-   * @param params - Request configuration including bucket and key.
-   */
-  async streamGet(params: GetObjectParams): Promise<Response> {
-    return await this.execute("GET", params, { expectedStatus: 200 });
-  }
-
-  /**
    * Issues a HEAD Object call returning metadata-only responses.
    *
    * @param params - Request configuration including bucket and key.
