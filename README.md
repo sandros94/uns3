@@ -13,6 +13,7 @@ Tiny, runtime-agnostic, S3 client.
 A lightweight, dependency-free S3 client that works across Node, Deno, Bun and modern browsers. Compatible with AWS S3 and S3-compatible providers (Cloudflare R2, Hetzner, Backblaze B2, Garage, etc.). Focused on a small, ergonomic API for streaming downloads, uploads, multipart uploads, presigned URLs and common object operations.
 
 Key features:
+
 - Runtime agnostic: same API in Node, Deno, Bun and browsers
 - Works with AWS S3 and S3-compatible endpoints (R2, Hetzner, Backblaze…)
 - Streamable responses (standard Response object)
@@ -188,7 +189,9 @@ Upload a part of the file. You need to provide the `uploadId` and a `partNumber`
 
 ```typescript
 const parts = [];
-const file = new Blob([/* ... large content ... */]);
+const file = new Blob([
+  /* ... large content ... */
+]);
 const chunkSize = 5 * 1024 * 1024; // 5MB
 
 for (let i = 0; i * chunkSize < file.size; i++) {
