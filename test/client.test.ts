@@ -362,6 +362,206 @@ describe("S3Client", () => {
       bucketRegion: "eu-central-1",
     });
   });
+
+  it("initiates multipart uploads and parses upload ids", async () => {
+    let captured: Request | undefined;
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<InitiateMultipartUploadResult>
+  <Bucket>my-bucket</Bucket>
+  <Key>photos/raw.png</Key>
+  <UploadId>upload-123</UploadId>
+</InitiateMultipartUploadResult>`;
+
+    const fetchMock = createFetchMock(async (request) => {
+      captured = request;
+      return new Response(xml, { status: 200 });
+    });
+
+    const client = new S3Client({
+      region: "us-east-1",
+      endpoint: "https://s3.us-east-1.amazonaws.com",
+      credentials,
+      fetch: fetchMock,
+    });
+
+    const result = await client.initiateMultipart({
+      bucket: "my-bucket",
+      key: "photos/raw.png",
+      contentType: "image/png",
+      headers: { "x-amz-meta-origin": "camera" },
+    });
+
+    expect(result.uploadId).toBe("upload-123");
+    expect(captured).toBeDefined();
+    const request = captured!;
+    expect(request.method).toBe("POST");
+    const url = new URL(request.url);
+    expect(url.searchParams.has("uploads")).toBe(true);
+    expect(url.searchParams.get("uploads")).toBe("");
+    expect(url.pathname.endsWith("/photos/raw.png")).toBe(true);
+    expect(request.headers.get("content-type")).toBe("image/png");
+    expect(request.headers.get("x-amz-meta-origin")).toBe("camera");
+    expect(await request.clone().text()).toBe("");
+  });
+
+  it("uploads parts and normalizes returned ETags", async () => {
+    let captured: Request | undefined;
+    const fetchMock = createFetchMock(async (request) => {
+      captured = request;
+      return new Response(null, {
+        status: 200,
+        headers: { etag: '"part-etag"' },
+      });
+    });
+
+    const client = new S3Client({
+      region: "us-east-1",
+      endpoint: "https://s3.us-east-1.amazonaws.com",
+      credentials,
+      fetch: fetchMock,
+    });
+
+    const payload = new TextEncoder().encode("part payload");
+    const result = await client.uploadPart({
+      bucket: "my-bucket",
+      key: "photos/raw.png",
+      uploadId: "upload-123",
+      partNumber: 1,
+      body: payload,
+      contentLength: payload.byteLength,
+    });
+
+    expect(result.etag).toBe("part-etag");
+    expect(captured).toBeDefined();
+    const request = captured!;
+    expect(request.method).toBe("PUT");
+    const url = new URL(request.url);
+    expect(url.searchParams.get("uploadId")).toBe("upload-123");
+    expect(url.searchParams.get("partNumber")).toBe("1");
+    expect(request.headers.get("content-length")).toBe(
+      String(payload.byteLength),
+    );
+  });
+
+  it("completes multipart uploads with sorted XML body", async () => {
+    let captured: Request | undefined;
+    const fetchMock = createFetchMock(async (request) => {
+      captured = request;
+      return new Response(
+        "<CompleteMultipartUploadResult></CompleteMultipartUploadResult>",
+        {
+          status: 200,
+        },
+      );
+    });
+
+    const client = new S3Client({
+      region: "us-east-1",
+      endpoint: "https://s3.us-east-1.amazonaws.com",
+      credentials,
+      fetch: fetchMock,
+    });
+
+    const response = await client.completeMultipart({
+      bucket: "my-bucket",
+      key: "photos/raw.png",
+      uploadId: "upload-123",
+      parts: [
+        { partNumber: 2, etag: '"etag-2"' },
+        { partNumber: 1, etag: "etag-1" },
+      ],
+    });
+
+    expect(response.status).toBe(200);
+    expect(captured).toBeDefined();
+    const request = captured!;
+    expect(request.headers.get("content-type")).toBe("application/xml");
+    const body = await request.clone().text();
+    const firstIndex = body.indexOf("<PartNumber>1</PartNumber>");
+    const secondIndex = body.indexOf("<PartNumber>2</PartNumber>");
+    expect(firstIndex).toBeGreaterThan(-1);
+    expect(secondIndex).toBeGreaterThan(-1);
+    expect(firstIndex).toBeLessThan(secondIndex);
+    expect(body).toContain('<ETag>"etag-1"</ETag>');
+    expect(body).toContain('<ETag>"etag-2"</ETag>');
+  });
+
+  it("aborts multipart uploads", async () => {
+    let seen = false;
+    const fetchMock = createFetchMock(async (request) => {
+      seen = true;
+      expect(request.method).toBe("DELETE");
+      const url = new URL(request.url);
+      expect(url.searchParams.get("uploadId")).toBe("upload-123");
+      return new Response(null, { status: 204 });
+    });
+
+    const client = new S3Client({
+      region: "us-east-1",
+      endpoint: "https://s3.us-east-1.amazonaws.com",
+      credentials,
+      fetch: fetchMock,
+    });
+
+    await expect(
+      client.abortMultipart({
+        bucket: "my-bucket",
+        key: "photos/raw.png",
+        uploadId: "upload-123",
+      }),
+    ).resolves.toBeUndefined();
+    expect(seen).toBe(true);
+  });
+
+  it("rejects invalid part numbers before making requests", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("fetch should not be invoked");
+    });
+
+    const client = new S3Client({
+      region: "us-east-1",
+      endpoint: "https://s3.us-east-1.amazonaws.com",
+      credentials,
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    const promise = client.uploadPart({
+      bucket: "my-bucket",
+      key: "photos/raw.png",
+      uploadId: "upload-123",
+      partNumber: 0,
+      body: "",
+    });
+
+    await expect(promise).rejects.toBeInstanceOf(RangeError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects completion with duplicate parts", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("fetch should not be invoked");
+    });
+
+    const client = new S3Client({
+      region: "us-east-1",
+      endpoint: "https://s3.us-east-1.amazonaws.com",
+      credentials,
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+
+    const promise = client.completeMultipart({
+      bucket: "my-bucket",
+      key: "photos/raw.png",
+      uploadId: "upload-123",
+      parts: [
+        { partNumber: 1, etag: "etag-1" },
+        { partNumber: 1, etag: "etag-dup" },
+      ],
+    });
+
+    await expect(promise).rejects.toThrow(/duplicate part numbers/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 // #region Real Bucket Tests
@@ -453,6 +653,73 @@ integrationSuite("S3Client integration (real bucket)", () => {
     const response = await fetch(url);
     expect(response.status).toBe(200);
     expect(await response.text()).toBe(body);
+  });
+
+  it("performs a multipart upload lifecycle", async () => {
+    const key = `${prefix}/multipart-${Date.now()}.txt`;
+    const encoder = new TextEncoder();
+    const partSize = 5 * 1024 * 1024;
+    const partOne = new Uint8Array(partSize);
+    partOne.fill("a".codePointAt(0)!);
+    const partTwo = encoder.encode("tail");
+
+    const init = await client.initiateMultipart({
+      bucket,
+      key,
+      contentType: "text/plain",
+    });
+
+    let completed = false;
+    try {
+      const uploadedPartOne = await client.uploadPart({
+        bucket,
+        key,
+        uploadId: init.uploadId,
+        partNumber: 1,
+        body: partOne,
+        contentLength: partOne.byteLength,
+      });
+
+      const uploadedPartTwo = await client.uploadPart({
+        bucket,
+        key,
+        uploadId: init.uploadId,
+        partNumber: 2,
+        body: partTwo,
+        contentLength: partTwo.byteLength,
+      });
+
+      const completeResponse = await client.completeMultipart({
+        bucket,
+        key,
+        uploadId: init.uploadId,
+        parts: [
+          { partNumber: 1, etag: uploadedPartOne.etag },
+          { partNumber: 2, etag: uploadedPartTwo.etag },
+        ],
+      });
+
+      expect([200, 201]).toContain(completeResponse.status);
+      completeResponse.body?.cancel?.();
+
+      trackedKeys.add(key);
+
+      const getResponse = await client.get({ bucket, key });
+      expect(getResponse.status).toBe(200);
+      const buffer = await getResponse.arrayBuffer();
+      const combined = new Uint8Array(buffer);
+      expect(combined.byteLength).toBe(partOne.byteLength + partTwo.byteLength);
+      expect(combined[0]).toBe(partOne[0]);
+      const tailSlice = combined.slice(-partTwo.byteLength);
+      expect(new TextDecoder().decode(tailSlice)).toBe("tail");
+      completed = true;
+    } finally {
+      if (!completed) {
+        await client
+          .abortMultipart({ bucket, key, uploadId: init.uploadId })
+          .catch(() => {});
+      }
+    }
   });
 
   async function deleteKeys(keys: Iterable<string>): Promise<void> {

@@ -13,17 +13,23 @@ import type {
   Methods,
   ContentTypeResolver,
   Credentials,
+  AbortMultipartParams,
+  CompleteMultipartParams,
   DeleteObjectParams,
   GetObjectParams,
   HeadObjectParams,
   ListObjectsV2Params,
   ListObjectsV2Response,
+  MultipartInitParams,
+  MultipartInitResult,
   ObjectRequest,
   PresignParams,
   PutObjectParams,
   S3ClientConfig,
   RetryConfig,
   ChecksumConfig,
+  UploadPartParams,
+  UploadPartResult,
 } from "./types";
 import { S3Error } from "./error";
 
@@ -225,6 +231,167 @@ export class S3Client {
     });
 
     return result.url.toString();
+  }
+
+  async initiateMultipart(
+    params: MultipartInitParams,
+  ): Promise<MultipartInitResult> {
+    const bucket = this.resolveBucket(params.bucket);
+    const key = this.resolveKey(params);
+    const contentType = resolveContentType(
+      key,
+      params.contentType,
+      this.contentTypeResolver,
+    );
+    const url = buildRequestUrl({
+      endpoint: this.endpoint,
+      bucketStyle: this.bucketStyle,
+      bucket,
+      key,
+    });
+
+    url.searchParams.set("uploads", "");
+    applyQuery(url, params.query);
+
+    const headers = createHeaders({
+      headers: params.headers,
+      contentType,
+      cacheControl: params.cacheControl,
+      contentDisposition: params.contentDisposition,
+      contentEncoding: params.contentEncoding,
+    });
+
+    const response = await this.perform({
+      method: "POST",
+      url,
+      headers,
+      bucket,
+      key,
+      expectedStatus: 200,
+      signal: params.signal,
+    });
+
+    const text = await response.text();
+    const uploadId = parseInitiateMultipartUpload(text);
+    if (!uploadId) {
+      throw new Error(
+        "UploadId not present in InitiateMultipartUpload response.",
+      );
+    }
+
+    return { uploadId };
+  }
+
+  async uploadPart(params: UploadPartParams): Promise<UploadPartResult> {
+    const bucket = this.resolveBucket(params.bucket);
+    const key = this.resolveKey(params);
+    const uploadId = validateUploadId(params.uploadId);
+    const partNumber = normalizePartNumber(params.partNumber);
+
+    const url = buildRequestUrl({
+      endpoint: this.endpoint,
+      bucketStyle: this.bucketStyle,
+      bucket,
+      key,
+    });
+
+    applyQuery(url, params.query);
+    url.searchParams.set("uploadId", uploadId);
+    url.searchParams.set("partNumber", String(partNumber));
+
+    const headers = createHeaders({ headers: params.headers });
+    if (typeof params.contentLength === "number") {
+      headers.set("content-length", String(params.contentLength));
+    }
+
+    const response = await this.perform({
+      method: "PUT",
+      url,
+      headers,
+      body: params.body,
+      bucket,
+      key,
+      expectedStatus: 200,
+      signal: params.signal,
+    });
+
+    const etagHeader = response.headers.get("etag");
+    response.body?.cancel?.();
+
+    if (!etagHeader) {
+      throw new Error("ETag header missing from UploadPart response.");
+    }
+
+    const etag = stripQuotes(etagHeader);
+    if (!etag) {
+      throw new Error("ETag header was empty in UploadPart response.");
+    }
+
+    return { etag };
+  }
+
+  async completeMultipart(params: CompleteMultipartParams): Promise<Response> {
+    const bucket = this.resolveBucket(params.bucket);
+    const key = this.resolveKey(params);
+    const uploadId = validateUploadId(params.uploadId);
+    const parts = normalizeCompletedParts(params.parts);
+    const payload = buildCompleteMultipartXml(parts);
+
+    const url = buildRequestUrl({
+      endpoint: this.endpoint,
+      bucketStyle: this.bucketStyle,
+      bucket,
+      key,
+    });
+
+    applyQuery(url, params.query);
+    url.searchParams.set("uploadId", uploadId);
+
+    const headers = createHeaders({
+      headers: params.headers,
+      contentType: "application/xml",
+    });
+
+    return await this.perform({
+      method: "POST",
+      url,
+      headers,
+      body: payload,
+      bucket,
+      key,
+      expectedStatus: 200,
+      signal: params.signal,
+    });
+  }
+
+  async abortMultipart(params: AbortMultipartParams): Promise<void> {
+    const bucket = this.resolveBucket(params.bucket);
+    const key = this.resolveKey(params);
+    const uploadId = validateUploadId(params.uploadId);
+
+    const url = buildRequestUrl({
+      endpoint: this.endpoint,
+      bucketStyle: this.bucketStyle,
+      bucket,
+      key,
+    });
+
+    applyQuery(url, params.query);
+    url.searchParams.set("uploadId", uploadId);
+
+    const headers = createHeaders({ headers: params.headers });
+
+    const response = await this.perform({
+      method: "DELETE",
+      url,
+      headers,
+      bucket,
+      key,
+      expectedStatus: [200, 202, 204],
+      signal: params.signal,
+    });
+
+    response.body?.cancel?.();
   }
 
   private async execute(
@@ -926,6 +1093,103 @@ function parseErrorXml(xml: string): {
     resource: extractTag(xml, "Resource"),
     region: extractTag(xml, "Region"),
   };
+}
+
+function parseInitiateMultipartUpload(xml: string): string | undefined {
+  return extractTag(xml, "UploadId") ?? undefined;
+}
+
+type CompletedPart = { partNumber: number; etag: string };
+
+function buildCompleteMultipartXml(parts: CompletedPart[]): string {
+  const body = parts
+    .map((part) => {
+      const etag = ensureQuotedEtag(part.etag);
+      return [
+        "  <Part>",
+        `    <PartNumber>${part.partNumber}</PartNumber>`,
+        `    <ETag>${escapeXml(etag)}</ETag>`,
+        "  </Part>",
+      ].join("\n");
+    })
+    .join("\n");
+
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    "<CompleteMultipartUpload>",
+    body,
+    "</CompleteMultipartUpload>",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function normalizeCompletedParts(
+  parts: CompleteMultipartParams["parts"],
+): CompletedPart[] {
+  if (!Array.isArray(parts) || parts.length === 0) {
+    throw new Error(
+      "At least one part is required to complete a multipart upload.",
+    );
+  }
+
+  const normalized = parts.map((part) => ({
+    partNumber: normalizePartNumber(part.partNumber),
+    etag: part.etag,
+  }));
+
+  normalized.sort((a, b) => a.partNumber - b.partNumber);
+
+  for (let index = 1; index < normalized.length; index += 1) {
+    if (normalized[index]!.partNumber === normalized[index - 1]!.partNumber) {
+      throw new Error("Duplicate part numbers are not allowed.");
+    }
+  }
+
+  return normalized;
+}
+
+function normalizePartNumber(value: number): number {
+  if (!Number.isFinite(value)) {
+    throw new RangeError("Part number must be a finite number.");
+  }
+  if (!Number.isInteger(value)) {
+    throw new RangeError("Part number must be an integer.");
+  }
+  if (value < 1 || value > 10_000) {
+    throw new RangeError("Part number must be between 1 and 10,000 inclusive.");
+  }
+  return value;
+}
+
+function validateUploadId(uploadId: string): string {
+  if (typeof uploadId !== "string") {
+    throw new TypeError("UploadId must be a string.");
+  }
+  const trimmed = uploadId.trim();
+  if (!trimmed) {
+    throw new Error("UploadId cannot be empty.");
+  }
+  return trimmed;
+}
+
+function ensureQuotedEtag(etag: string): string {
+  const trimmed = etag.trim();
+  if (!trimmed) {
+    throw new Error("ETag cannot be empty.");
+  }
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed;
+  }
+  return `"${trimmed}"`;
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/'/g, "&#39;");
 }
 
 function parseListObjectsV2(xml: string): ListObjectsV2Response {

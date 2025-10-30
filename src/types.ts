@@ -1,7 +1,9 @@
 export type UppercaseOrLowercase<T extends string> =
   | Uppercase<T>
   | Lowercase<T>;
-export type Methods = UppercaseOrLowercase<"GET" | "HEAD" | "PUT" | "DELETE">;
+export type Methods = UppercaseOrLowercase<
+  "GET" | "HEAD" | "POST" | "PUT" | "DELETE"
+>;
 
 export type Credentials = {
   accessKeyId: string;
@@ -84,6 +86,37 @@ export interface PutObjectParams extends ObjectRequest {
 }
 
 export type DeleteObjectParams = ObjectRequest;
+
+export interface MultipartInitParams extends ObjectRequest {
+  contentType?: string | false;
+  cacheControl?: string;
+  contentDisposition?: string;
+  contentEncoding?: string;
+}
+
+export interface MultipartInitResult {
+  uploadId: string;
+}
+
+export interface UploadPartParams extends ObjectRequest {
+  uploadId: string;
+  partNumber: number;
+  body: BodyInit | ReadableStream<Uint8Array> | null;
+  contentLength?: number;
+}
+
+export interface UploadPartResult {
+  etag: string;
+}
+
+export interface CompleteMultipartParams extends ObjectRequest {
+  uploadId: string;
+  parts: Array<{ partNumber: number; etag: string }>;
+}
+
+export interface AbortMultipartParams extends ObjectRequest {
+  uploadId: string;
+}
 
 export interface ListObjectsV2Params extends BaseRequest {
   prefix?: string;
