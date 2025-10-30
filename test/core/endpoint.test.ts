@@ -60,4 +60,16 @@ describe("endpoint builder", () => {
     expect(url.port).toBe("9000");
     expect(url.pathname).toBe("/my-bucket/photos/img.jpg");
   });
+
+  it("should handle keys with leading slashes", () => {
+    const url = buildRequestUrl({
+      endpoint: "https://s3.amazonaws.com",
+      bucketStyle: "virtual",
+      bucket: "my-bucket",
+      key: "/leading/slash.txt",
+    });
+
+    expect(url.hostname).toBe("my-bucket.s3.amazonaws.com");
+    expect(url.pathname).toBe("/leading/slash.txt");
+  });
 });

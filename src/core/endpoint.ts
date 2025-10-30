@@ -53,6 +53,7 @@ export function buildRequestUrl<T extends BucketStyle>(
 export function encodeS3Key(key: string): string {
   if (!key) return "";
   return key
+    .replace(/^\//, "") // Remove leading slash
     .split("/")
     .map((segment) => uriEncode(segment))
     .join("/");
