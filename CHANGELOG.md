@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.0.2
+
+[compare changes](https://github.com/sandros94/uns3/compare/v0.0.1...v0.0.2)
+
+### 🚀 Enhancements
+
+- **client:** `put` automatically stringify and set content type for plain objects ([d82f2f2](https://github.com/sandros94/uns3/commit/d82f2f2))
+
+### 🩹 Fixes
+
+- Optional `list` param ([57c123c](https://github.com/sandros94/uns3/commit/57c123c))
+- Handle keys with leading slashes ([b689ff5](https://github.com/sandros94/uns3/commit/b689ff5))
+
+### 🏡 Chore
+
+- Update prettierignore ([d8bf4ab](https://github.com/sandros94/uns3/commit/d8bf4ab))
+
+### 🤖 CI
+
+- Init ([16664f7](https://github.com/sandros94/uns3/commit/16664f7))
+
+### ❤️ Contributors
+
+- Sandro Circi ([@sandros94](https://github.com/sandros94))
+
 ## v0.0.1
 
 ### 🚀 Enhancements
