@@ -162,7 +162,7 @@ export class S3Client {
    *
    * @param params - Listing options such as prefix, delimiter, and pagination.
    */
-  async list(params: ListObjectsV2Params): Promise<ListObjectsV2Response> {
+  async list(params: ListObjectsV2Params = {}): Promise<ListObjectsV2Response> {
     const bucket = this.resolveBucket(params.bucket);
     const url = buildRequestUrl({
       endpoint: this.endpoint,
