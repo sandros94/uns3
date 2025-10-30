@@ -395,6 +395,8 @@ Each type and interface should be defined and exported in most relevant files.
   3. Tests for boundary sizes, retries per part, abort flows
 
 - Phase 4 (Nice-to-haves)
+  - Manage Buckets (create, delete, list)
+  - Object copy support
   - Hooks: logging/metrics, general on request/response start/end
   - SSE-C support (server-side encryption with customer keys)
   - Content-Disposition helpers
