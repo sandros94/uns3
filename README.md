@@ -110,7 +110,16 @@ Uploads an object to an S3 bucket. The `body` can be a `string`, `Blob`, `ArrayB
 await client.put({
   key: "hello.txt",
   body: "Hello, World!",
-  contentType: "text/plain",
+  contentType: "text/plain", // also inferred from key extension
+});
+
+// Upload from a plain object (automatically stringified)
+await client.put({
+  key: "hello.json",
+  body: {
+    message: "Hello, World!"
+  },
+  // contentType is automatically set to application/json
 });
 
 // Upload from a Blob
