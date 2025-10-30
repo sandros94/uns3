@@ -117,7 +117,7 @@ await client.put({
 await client.put({
   key: "hello.json",
   body: {
-    message: "Hello, World!"
+    message: "Hello, World!",
   },
   // contentType is automatically set to application/json
 });
