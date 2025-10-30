@@ -385,11 +385,13 @@ function clampExpiry(value: number): number {
 }
 
 function formatAmzDate(date: Date): { amzDate: string; shortDate: string } {
-  const iso = new Date(date.getTime() - date.getMilliseconds())
-    .toISOString()
-    .replace(/[-:]/g, "");
-  const amzDate = `${iso.slice(0, 8)}${iso.slice(8, 14)}Z`;
-  return { amzDate, shortDate: iso.slice(0, 8) };
+  const iso = new Date(date.getTime() - date.getMilliseconds()).toISOString();
+  const shortDate = iso.slice(0, 10).replace(/-/g, "");
+  const time = iso.slice(11, 19).replace(/:/g, "");
+  return {
+    amzDate: `${shortDate}T${time}Z`,
+    shortDate,
+  };
 }
 
 async function sha256Hex(data: Uint8Array<ArrayBuffer>): Promise<string> {
