@@ -395,7 +395,8 @@ Each type and interface should be defined and exported in most relevant files.
   3. Tests for boundary sizes, retries per part, abort flows
 
 - Phase 4 (Nice-to-haves)
-  1. Content-Disposition helpers
-  2. Metrics hooks
-  3. Async credentials provider support
-  4. Docs with provider matrix and caveats
+  - Hooks: logging/metrics, general on request/response start/end
+  - SSE-C support (server-side encryption with customer keys)
+  - Content-Disposition helpers
+  - Async credentials provider support
+  - Docs with provider matrix and caveats
