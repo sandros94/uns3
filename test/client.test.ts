@@ -606,20 +606,20 @@ integrationSuite("S3Client integration (real bucket)", () => {
   it("uploads, reads, and deletes an object", async () => {
     const key = `${prefix}/roundtrip-${Date.now()}.json`;
     trackedKeys.add(key);
-    const payload = JSON.stringify({ now: Date.now() });
+    const payload = { now: Date.now() };
 
     const putResponse = await client.put({
       bucket,
       key,
+      // This automatically stringifies to JSON and sets content-type
       body: payload,
-      contentType: "application/json",
     });
     expect([200, 201]).toContain(putResponse.status);
     putResponse.body?.cancel?.();
 
     const getResponse = await client.get({ bucket, key });
     expect(getResponse.status).toBe(200);
-    expect(await getResponse.text()).toBe(payload);
+    expect(await getResponse.json()).toStrictEqual(payload);
 
     const headResponse = await client.head({ bucket, key });
     expect(headResponse.status).toBe(200);

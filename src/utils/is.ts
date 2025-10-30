@@ -61,3 +61,33 @@ export function isDnsCompatibleBucketName(bucket: string): boolean {
   }
   return true;
 }
+
+export function isPlainObject(value: unknown): value is object {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  // Exclude primitive-like objects and built-in types that should not be stringified.
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value instanceof Date ||
+    value instanceof RegExp
+  ) {
+    return false;
+  }
+
+  // Exclude Blob, ArrayBuffer, ArrayBufferView, and ReadableStream which are valid BodyInit types
+  if (
+    isBlob(value) ||
+    isArrayBuffer(value) ||
+    isArrayBufferView(value) ||
+    isReadableStream(value)
+  ) {
+    return false;
+  }
+
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null || Array.isArray(value);
+}

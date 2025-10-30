@@ -78,7 +78,7 @@ export type GetObjectParams = ObjectRequest;
 export type HeadObjectParams = ObjectRequest;
 
 export interface PutObjectParams extends ObjectRequest {
-  body: BodyInit | ReadableStream<Uint8Array> | null;
+  body: BodyInit | ReadableStream<Uint8Array> | null | object;
   contentType?: string | false;
   cacheControl?: string;
   contentDisposition?: string;

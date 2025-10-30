@@ -32,6 +32,7 @@ import type {
   UploadPartResult,
 } from "./types";
 import { S3Error } from "./error";
+import { isPlainObject } from "./utils/is";
 
 interface RequestOptions {
   body?: BodyInit | ReadableStream<Uint8Array> | null;
@@ -132,14 +133,27 @@ export class S3Client {
    * @param params - Upload configuration including payload and metadata.
    */
   async put(params: PutObjectParams): Promise<Response> {
-    const contentType = resolveContentType(
+    const { body: rawBody, contentType: rawContentType } = params;
+    let body: BodyInit | ReadableStream<Uint8Array> | null;
+    let contentType: string | false | undefined;
+
+    if (isPlainObject(rawBody)) {
+      body = JSON.stringify(rawBody);
+      contentType =
+        rawContentType === undefined ? "application/json" : rawContentType;
+    } else {
+      body = rawBody as BodyInit | ReadableStream<Uint8Array> | null;
+      contentType = rawContentType;
+    }
+
+    const resolvedContentType = resolveContentType(
       params.key,
-      params.contentType,
+      contentType,
       this.contentTypeResolver,
     );
     return await this.execute("PUT", params, {
-      body: params.body,
-      contentType: contentType,
+      body,
+      contentType: resolvedContentType,
       cacheControl: params.cacheControl,
       contentDisposition: params.contentDisposition,
       contentEncoding: params.contentEncoding,
