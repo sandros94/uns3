@@ -1,4 +1,4 @@
-import type { BaseRequest, PutObjectParams } from "../types";
+import type { BaseRequest, ByteRange, PutObjectParams } from "../types";
 import { isReadableStream } from "../utils";
 
 export interface HeaderBuildOptions {
@@ -7,6 +7,11 @@ export interface HeaderBuildOptions {
   cacheControl?: string;
   contentDisposition?: string;
   contentEncoding?: string;
+  range?: ByteRange;
+  ifMatch?: string | string[];
+  ifNoneMatch?: string | string[];
+  ifModifiedSince?: Date | string;
+  ifUnmodifiedSince?: Date | string;
 }
 
 /**
@@ -31,6 +36,24 @@ export function createHeaders(options: HeaderBuildOptions): Headers {
 
   if (options.contentEncoding) {
     headers.set("content-encoding", options.contentEncoding);
+  }
+
+  const rangeValue = formatRange(options.range);
+  if (rangeValue) {
+    headers.set("range", rangeValue);
+  }
+
+  setMultiValueHeader(headers, "if-match", options.ifMatch);
+  setMultiValueHeader(headers, "if-none-match", options.ifNoneMatch);
+
+  const ifModifiedSince = formatHttpDate(options.ifModifiedSince);
+  if (ifModifiedSince) {
+    headers.set("if-modified-since", ifModifiedSince);
+  }
+
+  const ifUnmodifiedSince = formatHttpDate(options.ifUnmodifiedSince);
+  if (ifUnmodifiedSince) {
+    headers.set("if-unmodified-since", ifUnmodifiedSince);
   }
 
   return headers;
@@ -77,4 +100,85 @@ function normalizeQueryValue(value: string | number | boolean): string {
   if (typeof value === "number")
     return Number.isFinite(value) ? value.toString() : "";
   return value ? "true" : "false";
+}
+
+function formatRange(range: ByteRange | undefined): string | undefined {
+  if (!range) return undefined;
+  const start = normalizeRangeBoundary(range.start, "start");
+  const end = normalizeRangeBoundary(range.end, "end");
+  if (start === undefined && end === undefined) {
+    return undefined;
+  }
+  if (start !== undefined && end !== undefined && start > end) {
+    throw new RangeError("Range start must be less than or equal to end");
+  }
+  if (start === undefined) {
+    return `bytes=-${end}`;
+  }
+  if (end === undefined) {
+    return `bytes=${start}-`;
+  }
+  return `bytes=${start}-${end}`;
+}
+
+function normalizeRangeBoundary(
+  value: number | undefined,
+  label: "start" | "end",
+): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isFinite(value)) {
+    throw new RangeError(`Range ${label} must be a finite number`);
+  }
+  if (value < 0) {
+    throw new RangeError(`Range ${label} cannot be negative`);
+  }
+  if (!Number.isInteger(value)) {
+    throw new RangeError(`Range ${label} must be an integer`);
+  }
+  return value;
+}
+
+function setMultiValueHeader(
+  headers: Headers,
+  name: string,
+  value: string | string[] | undefined,
+): void {
+  const normalized = normalizeHeaderValues(value);
+  if (normalized) {
+    headers.set(name, normalized);
+  }
+}
+
+function normalizeHeaderValues(
+  value: string | string[] | undefined,
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const list = Array.isArray(value) ? value : [value];
+  const filtered = list
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter((entry) => entry.length > 0);
+  if (filtered.length === 0) {
+    return undefined;
+  }
+  return filtered.join(", ");
+}
+
+function formatHttpDate(value: Date | string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value instanceof Date) {
+    return value.toUTCString();
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const time = Date.parse(trimmed);
+  if (Number.isNaN(time)) {
+    throw new TypeError("Invalid HTTP date string provided");
+  }
+  return new Date(time).toUTCString();
 }

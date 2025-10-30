@@ -35,4 +35,29 @@ describe("endpoint builder", () => {
     // Reserved characters are encoded while path separators are preserved
     expect(encodeS3Key("colon:and/slash/")).toBe("colon%3Aand/slash/");
   });
+
+  it("falls back to path-style when bucket is not DNS-compliant", () => {
+    const url = buildRequestUrl({
+      endpoint: "https://s3.amazonaws.com",
+      bucketStyle: "virtual",
+      bucket: "My_Bucket",
+      key: "object.txt",
+    });
+
+    expect(url.hostname).toBe("s3.amazonaws.com");
+    expect(url.pathname).toBe("/My_Bucket/object.txt");
+  });
+
+  it("uses path-style addressing for IP-based endpoints", () => {
+    const url = buildRequestUrl({
+      endpoint: "http://127.0.0.1:9000",
+      bucketStyle: "virtual",
+      bucket: "my-bucket",
+      key: "photos/img.jpg",
+    });
+
+    expect(url.hostname).toBe("127.0.0.1");
+    expect(url.port).toBe("9000");
+    expect(url.pathname).toBe("/my-bucket/photos/img.jpg");
+  });
 });

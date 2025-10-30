@@ -1,5 +1,5 @@
 import type { BucketStyle } from "../types";
-import { uriEncode } from "../utils";
+import { uriEncode, isDnsCompatibleBucketName } from "../utils";
 
 type EndpointStyle<T extends BucketStyle = BucketStyle> = T extends "virtual"
   ? { bucket?: string; bucketStyle: "virtual" }
@@ -23,12 +23,14 @@ export function buildRequestUrl<T extends BucketStyle>(
   input: EndpointInput<T>,
 ): URL {
   const { endpoint, bucketStyle, bucket, key } = input;
-  if (!bucket && bucketStyle !== "path") {
+  const base = new URL(endpoint);
+  const effectiveStyle = resolveBucketStyle(bucketStyle, bucket, base.hostname);
+
+  if (!bucket && effectiveStyle !== "path") {
     throw new Error("Bucket is required for virtual-hosted-style requests");
   }
 
-  const base = new URL(endpoint);
-  const finalBucketStyle = bucket ? bucketStyle : "virtual";
+  const finalBucketStyle = bucket ? effectiveStyle : "virtual";
   if (bucket && finalBucketStyle === "virtual") {
     base.hostname = `${bucket}.${base.hostname}`;
   } else if (bucket && finalBucketStyle === "path") {
@@ -61,4 +63,34 @@ export function encodeS3Key(key: string): string {
 function normalizeBasePath(pathname: string): string {
   const trimmed = pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
   return trimmed;
+}
+
+function resolveBucketStyle(
+  preferred: BucketStyle,
+  bucket: string | undefined,
+  hostname: string,
+): BucketStyle {
+  if (!bucket) {
+    return preferred;
+  }
+
+  if (preferred === "path") {
+    return "path";
+  }
+
+  if (!isDnsCompatibleBucketName(bucket)) {
+    return "path";
+  }
+
+  if (looksLikeIpAddress(hostname) || hostname === "localhost") {
+    return "path";
+  }
+
+  return "virtual";
+}
+
+const IP_ADDRESS_REGEX = /^(\d{1,3}\.){3}\d{1,3}$/;
+
+function looksLikeIpAddress(value: string): boolean {
+  return IP_ADDRESS_REGEX.test(value);
 }

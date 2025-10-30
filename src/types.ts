@@ -13,6 +13,18 @@ export type CredentialsProvider = () => Promise<Credentials> | Credentials;
 
 export type BucketStyle = "virtual" | "path";
 
+export interface ByteRange {
+  start?: number;
+  end?: number;
+}
+
+export interface ConditionalHeaders {
+  ifMatch?: string | string[];
+  ifNoneMatch?: string | string[];
+  ifModifiedSince?: Date | string;
+  ifUnmodifiedSince?: Date | string;
+}
+
 export interface RetryConfig {
   maxAttempts: number;
   baseDelayMs: number;
@@ -54,8 +66,9 @@ export interface BaseRequest {
   signal?: AbortSignal;
 }
 
-export interface ObjectRequest extends BaseRequest {
+export interface ObjectRequest extends BaseRequest, ConditionalHeaders {
   key: string;
+  range?: ByteRange;
 }
 
 export type GetObjectParams = ObjectRequest;

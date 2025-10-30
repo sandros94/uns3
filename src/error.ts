@@ -7,6 +7,11 @@ export class S3Error extends Error {
   readonly code?: string;
   readonly requestId?: string;
   readonly extendedRequestId?: string;
+  readonly retriable: boolean;
+  readonly retryAfter?: number;
+  readonly resource?: string;
+  readonly region?: string;
+  readonly bucketRegion?: string;
 
   /**
    * @param init - Metadata describing the failure returned by S3.
@@ -17,6 +22,11 @@ export class S3Error extends Error {
     code?: string;
     requestId?: string;
     extendedRequestId?: string;
+    retriable?: boolean;
+    retryAfter?: number;
+    resource?: string;
+    region?: string;
+    bucketRegion?: string;
   }) {
     super(init.message);
     this.name = "S3Error";
@@ -24,5 +34,10 @@ export class S3Error extends Error {
     this.code = init.code;
     this.requestId = init.requestId;
     this.extendedRequestId = init.extendedRequestId;
+    this.retriable = init.retriable ?? false;
+    this.retryAfter = init.retryAfter;
+    this.resource = init.resource;
+    this.region = init.region;
+    this.bucketRegion = init.bucketRegion;
   }
 }

@@ -31,3 +31,33 @@ export function isReadableStream(
     typeof ReadableStream !== "undefined" && value instanceof ReadableStream
   );
 }
+
+const IP_ADDRESS_REGEX = /^(\d{1,3}\.){3}\d{1,3}$/;
+
+function looksLikeIpAddress(value: string): boolean {
+  return IP_ADDRESS_REGEX.test(value);
+}
+
+export function isDnsCompatibleBucketName(bucket: string): boolean {
+  if (bucket.length < 3 || bucket.length > 63) {
+    return false;
+  }
+  if (
+    bucket.startsWith(".") ||
+    bucket.startsWith("-") ||
+    bucket.endsWith(".") ||
+    bucket.endsWith("-")
+  ) {
+    return false;
+  }
+  if (bucket.includes("..")) {
+    return false;
+  }
+  if (!/^[a-z0-9.-]+$/.test(bucket)) {
+    return false;
+  }
+  if (looksLikeIpAddress(bucket)) {
+    return false;
+  }
+  return true;
+}
