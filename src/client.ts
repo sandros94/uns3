@@ -1016,10 +1016,12 @@ async function createError(response: Response): Promise<S3Error> {
   let code: string | undefined;
   let resource: string | undefined;
   let region: string | undefined;
+  let bodyText: string | undefined;
 
   try {
     const text = await readErrorBody(response);
     if (text) {
+      bodyText = text;
       const parsed = parseErrorXml(text);
       if (parsed.message) message = parsed.message;
       if (parsed.code) code = parsed.code;
@@ -1034,6 +1036,13 @@ async function createError(response: Response): Promise<S3Error> {
   const retryAfter = parseRetryAfterHeader(response.headers.get("retry-after"));
   const retriable = determineErrorRetriable(response.status, code);
 
+  // Capture headers for debugging
+  const headersRecord: Record<string, string> = {};
+  // eslint-disable-next-line unicorn/no-array-for-each
+  response.headers.forEach((value, key) => {
+    headersRecord[key] = value;
+  });
+
   return new S3Error({
     message,
     status: response.status,
@@ -1045,6 +1054,13 @@ async function createError(response: Response): Promise<S3Error> {
     resource,
     region: region ?? bucketRegion,
     bucketRegion,
+    cause: {
+      url: response.url,
+      status: response.status,
+      statusText: response.statusText,
+      headers: headersRecord,
+      body: bodyText,
+    },
   });
 }
 

@@ -12,6 +12,7 @@ export class S3Error extends Error {
   readonly resource?: string;
   readonly region?: string;
   readonly bucketRegion?: string;
+  override readonly cause?: unknown;
 
   /**
    * @param init - Metadata describing the failure returned by S3.
@@ -27,8 +28,9 @@ export class S3Error extends Error {
     resource?: string;
     region?: string;
     bucketRegion?: string;
+    cause?: unknown;
   }) {
-    super(init.message);
+    super(init.message, { cause: init.cause });
     this.name = "S3Error";
     this.status = init.status;
     this.code = init.code;
@@ -39,5 +41,6 @@ export class S3Error extends Error {
     this.resource = init.resource;
     this.region = init.region;
     this.bucketRegion = init.bucketRegion;
+    this.cause = init.cause;
   }
 }
