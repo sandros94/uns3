@@ -303,7 +303,18 @@ function getCanonicalUri(pathname: string): string {
   if (!pathname) return "/";
   const encodedPath = pathname
     .split("/")
-    .map((part) => uriEncode(part))
+    .map((part) => {
+      // Decode first to avoid double-encoding already-encoded segments
+      // This handles cases where URL.pathname contains encoded characters
+      if (!part) return part;
+      try {
+        const decoded = decodeURIComponent(part);
+        return uriEncode(decoded);
+      } catch {
+        // If decoding fails, encode as-is (shouldn't happen with valid URLs)
+        return uriEncode(part);
+      }
+    })
     .join("/");
   return encodedPath.startsWith("/") ? encodedPath : `/${encodedPath}`;
 }

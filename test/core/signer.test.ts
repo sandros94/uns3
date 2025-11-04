@@ -101,6 +101,42 @@ describe("signer", () => {
     const signature = params.get("X-Amz-Signature");
     expect(signature).toMatch(/^[a-f0-9]{64}$/);
   });
+
+  it("handles keys with special characters without double-encoding", async () => {
+    // Test with a key containing spaces
+    const url = new URL(
+      "https://my-bucket.s3.us-east-1.amazonaws.com/my%20file%20name.txt",
+    );
+
+    const result = await signRequest({
+      method: "GET",
+      url,
+      credentials,
+      region: "us-east-1",
+      unsignedPayload: true,
+    });
+
+    const auth = result.headers.get("authorization");
+    expect(auth).toBeTruthy();
+
+    expect(auth).toMatch(/^AWS4-HMAC-SHA256/);
+
+    // Also test presigned URL with special characters
+    const { url: presigned } = await presignUrl({
+      method: "GET",
+      url,
+      credentials,
+      region: "us-east-1",
+      unsignedPayload: true,
+      expiresInSeconds: 900,
+    });
+
+    const signature = presigned.searchParams.get("X-Amz-Signature");
+    expect(signature).toMatch(/^[a-f0-9]{64}$/);
+
+    // Verify the URL pathname is correctly encoded (single encoding, not double)
+    expect(presigned.pathname).toBe("/my%20file%20name.txt");
+  });
 });
 
 function deriveSigningKey(
