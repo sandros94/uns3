@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.0.3
+
+[compare changes](https://github.com/sandros94/uns3/compare/v0.0.2...v0.0.3)
+
+### 🚀 Enhancements
+
+- **error:** Enhance S3Error to include cause information ([b6e89c2](https://github.com/sandros94/uns3/commit/b6e89c2))
+
+### 🩹 Fixes
+
+- **signer:** Prevent double-encoding of URL pathname segments ([0280988](https://github.com/sandros94/uns3/commit/0280988))
+
+### 📖 Documentation
+
+- Update `put` examples ([007a376](https://github.com/sandros94/uns3/commit/007a376))
+
+### ❤️ Contributors
+
+- Sandro Circi ([@sandros94](https://github.com/sandros94))
+
 ## v0.0.2
 
 [compare changes](https://github.com/sandros94/uns3/compare/v0.0.1...v0.0.2)
