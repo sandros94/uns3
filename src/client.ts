@@ -111,24 +111,36 @@ export class S3Client {
    * Executes a GET Object request and returns the raw {@link Response}. For
    * streamed consumption prefer {@link Response.body} or {@link streamGet}.
    *
+   * Supports conditional requests via `ifMatch`, `ifNoneMatch`, `ifModifiedSince`,
+   * and `ifUnmodifiedSince`. When the object hasn't changed, S3 may return a
+   * `304 Not Modified` response with no body, which is treated as success.
+   *
    * @param params - Request configuration including bucket and key.
    */
   async get(params: GetObjectParams): Promise<Response> {
-    return await this.execute("GET", params, { expectedStatus: 200 });
+    return await this.execute("GET", params, { expectedStatus: [200, 304] });
   }
 
   /**
    * Issues a HEAD Object call returning metadata-only responses.
    *
+   * Supports conditional requests via `ifMatch`, `ifNoneMatch`, `ifModifiedSince`,
+   * and `ifUnmodifiedSince`. When the object hasn't changed, S3 may return a
+   * `304 Not Modified` response, which is treated as success.
+   *
    * @param params - Request configuration including bucket and key.
    */
   async head(params: HeadObjectParams): Promise<Response> {
-    return await this.execute("HEAD", params, { expectedStatus: 200 });
+    return await this.execute("HEAD", params, { expectedStatus: [200, 304] });
   }
 
   /**
    * Uploads an object using PUT semantics. Content-Type is resolved via the
    * configured resolver when not explicitly supplied.
+   *
+   * Supports optional conditional headers (`ifMatch`, `ifNoneMatch`) for conditional
+   * overwrites. Note that not all S3-compatible providers support these headers.
+   * When conditions fail, S3 returns `412 Precondition Failed`.
    *
    * @param params - Upload configuration including payload and metadata.
    */
@@ -157,7 +169,7 @@ export class S3Client {
       cacheControl: params.cacheControl,
       contentDisposition: params.contentDisposition,
       contentEncoding: params.contentEncoding,
-      expectedStatus: 200,
+      expectedStatus: [200, 412],
     });
   }
 
@@ -344,6 +356,15 @@ export class S3Client {
     return { etag };
   }
 
+  /**
+   * Completes a multipart upload by assembling previously uploaded parts.
+   *
+   * Supports optional conditional headers (`ifMatch`, `ifNoneMatch`) for conditional
+   * overwrites. Note that not all S3-compatible providers support these headers.
+   * When conditions fail, S3 returns `412 Precondition Failed`.
+   *
+   * @param params - Configuration for completing the multipart upload.
+   */
   async completeMultipart(params: CompleteMultipartParams): Promise<Response> {
     const bucket = this.resolveBucket(params.bucket);
     const key = this.resolveKey(params);
@@ -363,6 +384,8 @@ export class S3Client {
 
     const headers = createHeaders({
       headers: params.headers,
+      ifMatch: params.ifMatch,
+      ifNoneMatch: params.ifNoneMatch,
       contentType: "application/xml",
     });
 
@@ -373,7 +396,7 @@ export class S3Client {
       body: payload,
       bucket,
       key,
-      expectedStatus: 200,
+      expectedStatus: [200, 412],
       signal: params.signal,
     });
   }
@@ -401,7 +424,7 @@ export class S3Client {
       headers,
       bucket,
       key,
-      expectedStatus: [200, 202, 204],
+      expectedStatus: [200, 202, 204], // TODO: study if this should also support 412
       signal: params.signal,
     });
 

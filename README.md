@@ -90,6 +90,27 @@ const partialResponse = await client.get({
 const chunk = await partialResponse.arrayBuffer();
 ```
 
+**Conditional Requests & Caching**
+
+The `get()` and `head()` methods support conditional request headers (`ifMatch`, `ifNoneMatch`, `ifModifiedSince`, `ifUnmodifiedSince`). When the object hasn't changed, S3 returns a `304 Not Modified` response, which is treated as a success.
+
+```typescript
+// Conditional GET using ETag
+const response = await client.get({
+  key: "cached-file.txt",
+  ifNoneMatch: '"abc123"', // ETag from previous request
+});
+
+if (response.status === 304) {
+  console.log("Content hasn't changed, use cached version");
+} else {
+  // Status is 200, process new content
+  const content = await response.text();
+}
+```
+
+This is especially useful when serving S3 responses through a server framework (e.g., Nitro, Nuxt) to browsers, as the library correctly handles browser cache validation.
+
 #### `head()`
 
 Retrieves metadata from an object without returning the object itself.
@@ -130,9 +151,30 @@ await client.put({
 });
 ```
 
+**Conditional Overwrites (Advanced)**
+
+The `put()` method supports optional conditional headers (`ifMatch`, `ifNoneMatch`) for preventing accidental overwrites. Note that not all S3-compatible providers support these headers.
+
+```typescript
+// Only overwrite if the current ETag matches
+const response = await client.put({
+  key: "document.txt",
+  body: "Updated content",
+  ifMatch: '"abc123"', // Current object's ETag
+});
+
+if (response.status === 412) {
+  console.log("Precondition failed - object was modified by someone else");
+} else {
+  console.log("Upload successful");
+}
+```
+
+When conditional headers are used and the condition fails, S3 returns `412 Precondition Failed` (not `304 Not Modified` like GET/HEAD operations).
+
 #### `del()`
 
-Deletes an object from a bucket.
+Deletes an object from a bucket. Note: DELETE operations do not support conditional headers.
 
 ```typescript
 await client.del({ key: "my-file-to-delete.txt" });
@@ -229,6 +271,28 @@ await client.completeMultipart({
   parts: parts,
 });
 ```
+
+**Conditional Overwrites (Advanced)**
+
+The `completeMultipart()` method supports optional conditional headers (`ifMatch`, `ifNoneMatch`) for preventing accidental overwrites. Note that not all S3-compatible providers support these headers.
+
+```typescript
+// Only overwrite if the current ETag matches
+const response = await client.completeMultipart({
+  uploadId,
+  key: "large-video.mp4",
+  parts: parts,
+  ifMatch: '"abc123"', // Current object's ETag
+});
+
+if (response.status === 412) {
+  console.log("Precondition failed - object was modified by someone else");
+} else {
+  console.log("Upload successful");
+}
+```
+
+When conditional headers are used and the condition fails, S3 returns `412 Precondition Failed` (not `304 Not Modified` like GET/HEAD operations).
 
 #### `abortMultipart()`
 

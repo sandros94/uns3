@@ -77,7 +77,10 @@ export type GetObjectParams = ObjectRequest;
 
 export type HeadObjectParams = ObjectRequest;
 
-export interface PutObjectParams extends ObjectRequest {
+export interface PutObjectParams
+  extends BaseRequest,
+    Pick<ConditionalHeaders, "ifMatch" | "ifNoneMatch"> {
+  key: string;
   body: BodyInit | ReadableStream<Uint8Array> | null | object;
   contentType?: string | false;
   cacheControl?: string;
@@ -85,9 +88,12 @@ export interface PutObjectParams extends ObjectRequest {
   contentEncoding?: string;
 }
 
-export type DeleteObjectParams = ObjectRequest;
+export interface DeleteObjectParams extends BaseRequest {
+  key: string;
+}
 
-export interface MultipartInitParams extends ObjectRequest {
+export interface MultipartInitParams extends BaseRequest {
+  key: string;
   contentType?: string | false;
   cacheControl?: string;
   contentDisposition?: string;
@@ -98,7 +104,8 @@ export interface MultipartInitResult {
   uploadId: string;
 }
 
-export interface UploadPartParams extends ObjectRequest {
+export interface UploadPartParams extends BaseRequest {
+  key: string;
   uploadId: string;
   partNumber: number;
   body: BodyInit | ReadableStream<Uint8Array> | null;
@@ -109,12 +116,16 @@ export interface UploadPartResult {
   etag: string;
 }
 
-export interface CompleteMultipartParams extends ObjectRequest {
+export interface CompleteMultipartParams
+  extends BaseRequest,
+    Pick<ConditionalHeaders, "ifMatch" | "ifNoneMatch"> {
+  key: string;
   uploadId: string;
   parts: Array<{ partNumber: number; etag: string }>;
 }
 
-export interface AbortMultipartParams extends ObjectRequest {
+export interface AbortMultipartParams extends BaseRequest {
+  key: string;
   uploadId: string;
 }
 

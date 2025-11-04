@@ -222,6 +222,62 @@ describe("S3Client", () => {
     );
   });
 
+  it("treats 304 Not Modified as success for GET requests", async () => {
+    const fetchMock = createFetchMock(async () => {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          etag: '"abc123"',
+          "last-modified": "Sun, 01 Jan 2023 00:00:00 GMT",
+        },
+      });
+    });
+
+    const client = new S3Client({
+      region: "us-east-1",
+      endpoint: "https://s3.us-east-1.amazonaws.com",
+      credentials,
+      fetch: fetchMock,
+    });
+
+    const response = await client.get({
+      bucket: "my-bucket",
+      key: "cached.txt",
+      ifNoneMatch: '"abc123"',
+    });
+
+    expect(response.status).toBe(304);
+    expect(response.headers.get("etag")).toBe('"abc123"');
+  });
+
+  it("treats 304 Not Modified as success for HEAD requests", async () => {
+    const fetchMock = createFetchMock(async () => {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          etag: '"def456"',
+          "last-modified": "Mon, 02 Jan 2023 00:00:00 GMT",
+        },
+      });
+    });
+
+    const client = new S3Client({
+      region: "us-east-1",
+      endpoint: "https://s3.us-east-1.amazonaws.com",
+      credentials,
+      fetch: fetchMock,
+    });
+
+    const response = await client.head({
+      bucket: "my-bucket",
+      key: "metadata.txt",
+      ifModifiedSince: new Date("2023-01-03T00:00:00Z"),
+    });
+
+    expect(response.status).toBe(304);
+    expect(response.headers.get("etag")).toBe('"def456"');
+  });
+
   it("retries GET after RequestTimeTooSkewed using server time", async () => {
     const errorXml = `<?xml version="1.0" encoding="UTF-8"?>
 <Error>
