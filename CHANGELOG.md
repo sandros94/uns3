@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.0.4
+
+[compare changes](https://github.com/sandros94/uns3/compare/v0.0.3...v0.0.4)
+
+### 🩹 Fixes
+
+- **client:** Improve support for conditional requests and responses methods ([50c6981](https://github.com/sandros94/uns3/commit/50c6981))
+
+### ❤️ Contributors
+
+- Sandro Circi ([@sandros94](https://github.com/sandros94))
+
 ## v0.0.3
 
 [compare changes](https://github.com/sandros94/uns3/compare/v0.0.2...v0.0.3)
