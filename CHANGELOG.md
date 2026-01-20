@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.0.5
+
+[compare changes](https://github.com/sandros94/uns3/compare/v0.0.4...v0.0.5)
+
+### 🩹 Fixes
+
+- **client:** Enhance credential handling and add anonymous support ([9085ce3](https://github.com/sandros94/uns3/commit/9085ce3))
+
+### 🏡 Chore
+
+- Update deps ([711ed9d](https://github.com/sandros94/uns3/commit/711ed9d))
+- Update babel packages to latest versions ([f16c135](https://github.com/sandros94/uns3/commit/f16c135))
+
+### 🤖 CI
+
+- Unify jobs and run autofix only when required ([a7c9375](https://github.com/sandros94/uns3/commit/a7c9375))
+- Add publish workflow ([bf906bb](https://github.com/sandros94/uns3/commit/bf906bb))
+- Update release script ([392a067](https://github.com/sandros94/uns3/commit/392a067))
+
+### ❤️ Contributors
+
+- Sandro Circi ([@sandros94](https://github.com/sandros94))
+
 ## v0.0.4
 
 [compare changes](https://github.com/sandros94/uns3/compare/v0.0.3...v0.0.4)
