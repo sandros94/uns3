@@ -1,6 +1,6 @@
 {
   "name": "uns3",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Runtime agnostic S3 client.",
   "repository": "sandros94/uns3",
   "license": "MIT",

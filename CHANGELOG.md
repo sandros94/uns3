@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.0.6
+
+[compare changes](https://github.com/sandros94/uns3/compare/v0.0.5...v0.0.6)
+
+### 🩹 Fixes
+
+- **client:** Prevent canceling response body if already used and improve error body reading ([f84d674](https://github.com/sandros94/uns3/commit/f84d674))
+
+### ❤️ Contributors
+
+- Sandro Circi ([@sandros94](https://github.com/sandros94))
+
 ## v0.0.5
 
 [compare changes](https://github.com/sandros94/uns3/compare/v0.0.4...v0.0.5)
