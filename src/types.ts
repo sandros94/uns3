@@ -42,7 +42,7 @@ export interface ChecksumConfig {
 export interface S3ClientConfig {
   region: string;
   endpoint: string;
-  credentials: Credentials | CredentialsProvider;
+  credentials?: Credentials | CredentialsProvider;
   defaultBucket?: string;
   bucketStyle?: BucketStyle;
   fetch?: typeof fetch;
@@ -78,8 +78,7 @@ export type GetObjectParams = ObjectRequest;
 export type HeadObjectParams = ObjectRequest;
 
 export interface PutObjectParams
-  extends BaseRequest,
-    Pick<ConditionalHeaders, "ifMatch" | "ifNoneMatch"> {
+  extends BaseRequest, Pick<ConditionalHeaders, "ifMatch" | "ifNoneMatch"> {
   key: string;
   body: BodyInit | ReadableStream<Uint8Array> | null | object;
   contentType?: string | false;
@@ -117,8 +116,7 @@ export interface UploadPartResult {
 }
 
 export interface CompleteMultipartParams
-  extends BaseRequest,
-    Pick<ConditionalHeaders, "ifMatch" | "ifNoneMatch"> {
+  extends BaseRequest, Pick<ConditionalHeaders, "ifMatch" | "ifNoneMatch"> {
   key: string;
   uploadId: string;
   parts: Array<{ partNumber: number; etag: string }>;

@@ -79,6 +79,34 @@ describe("S3Client", () => {
     expect(headers.get("authorization")).toMatch(/^AWS4-HMAC-SHA256/);
   });
 
+  it("performs anonymous GET when no credentials are provided", async () => {
+    let capturedRequest: Request | undefined;
+    const fetchMock = createFetchMock(async (request) => {
+      capturedRequest = request;
+      return new Response("hello world", { status: 200 });
+    });
+
+    const client = new S3Client({
+      region: "us-east-1",
+      endpoint: "https://s3.us-east-1.amazonaws.com",
+      // No credentials provided
+      fetch: fetchMock,
+    });
+
+    const body = await client
+      .get({
+        bucket: "public-bucket",
+        key: "hello.txt",
+      })
+      .then((res) => res.text());
+
+    expect(body).toBe("hello world");
+    expect(capturedRequest).toBeDefined();
+    const headers = capturedRequest!.headers;
+    expect(headers.has("authorization")).toBe(false);
+    expect(headers.has("x-amz-date")).toBe(false);
+  });
+
   it("lists objects and parses XML response", async () => {
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">

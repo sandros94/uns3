@@ -246,6 +246,10 @@ export class S3Client {
     const headers = createHeaders({ headers: params.headers });
     const credentials = await this.resolveCredentials();
 
+    if (!credentials) {
+      throw new Error("Cannot generate presigned URL without credentials.");
+    }
+
     const result = await presignUrl({
       method: params.method,
       url,
@@ -491,20 +495,25 @@ export class S3Client {
     while (attempt < maxAttempts) {
       attempt += 1;
 
-      const result = await signRequest({
-        method: context.method,
-        url: context.url,
-        headers: context.headers,
-        body: context.body,
-        credentials,
-        region: this.region,
-        unsignedPayload,
-        datetime: this.createSigningDate(),
-      });
+      let headers = context.headers;
+
+      if (credentials) {
+        const result = await signRequest({
+          method: context.method,
+          url: context.url,
+          headers: context.headers,
+          body: context.body,
+          credentials,
+          region: this.region,
+          unsignedPayload,
+          datetime: this.createSigningDate(),
+        });
+        headers = result.headers;
+      }
 
       const request = new Request(context.url.toString(), {
         method: context.method,
-        headers: result.headers,
+        headers,
         body: hasBody(context.method) ? (context.body ?? null) : undefined,
         signal: context.signal,
       });
@@ -592,8 +601,12 @@ export class S3Client {
     return params.key;
   }
 
-  private async resolveCredentials(): Promise<Credentials> {
+  private async resolveCredentials(): Promise<Credentials | undefined> {
     const value = this.credentials;
+    if (!value) {
+      return undefined;
+    }
+
     const credentials = typeof value === "function" ? await value() : value;
     if (
       !credentials ||
