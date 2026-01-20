@@ -39,18 +39,18 @@
   },
   "devDependencies": {
     "@types/node": "^22",
-    "@vitest/coverage-v8": "^4.0.4",
+    "@vitest/coverage-v8": "^4.0.17",
     "automd": "^0.4.2",
     "changelogen": "^0.6.2",
-    "eslint": "^9.38.0",
-    "eslint-config-unjs": "^0.5.0",
-    "prettier": "^3.6.2",
+    "eslint": "^9.39.2",
+    "eslint-config-unjs": "^0.6.2",
+    "prettier": "^3.8.0",
     "typescript": "^5.9.3",
     "unbuild": "^3.6.1",
-    "vitest": "^4.0.4"
+    "vitest": "^4.0.17"
   },
   "engines": {
     "node": "22"
   },
-  "packageManager": "pnpm@10.25.0"
+  "packageManager": "pnpm@10.28.1"
 }
