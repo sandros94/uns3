@@ -107,6 +107,51 @@ describe("S3Client", () => {
     expect(headers.has("x-amz-date")).toBe(false);
   });
 
+  it("handles 403 Forbidden with upstream error propagation", async () => {
+    const fetchMock = createFetchMock(async () => {
+      // Simulate S3 Access Denied error
+      return new Response(
+        `<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+    <Code>AccessDenied</Code>
+    <Message>Access Denied</Message>
+    <RequestId>REQUESTID123</RequestId>
+    <HostId>HOSTID123</HostId>
+</Error>`,
+        {
+          status: 403,
+          headers: {
+            "content-type": "application/xml",
+            "x-amz-request-id": "REQUESTID123",
+            "x-amz-id-2": "HOSTID123",
+          },
+        },
+      );
+    });
+
+    const client = new S3Client({
+      region: "us-east-1",
+      endpoint: "https://s3.us-east-1.amazonaws.com",
+      credentials,
+      fetch: fetchMock,
+    });
+
+    try {
+      await client.del({
+        bucket: "my-bucket",
+        key: "protected.txt",
+      });
+      // Should not reach here
+      expect.fail("Should have thrown S3Error");
+    } catch (error) {
+      expect(error).toBeInstanceOf(S3Error);
+      const s3Err = error as S3Error;
+      expect(s3Err.status).toBe(403);
+      expect(s3Err.code).toBe("AccessDenied");
+      expect(s3Err.requestId).toBe("REQUESTID123");
+    }
+  });
+
   it("lists objects and parses XML response", async () => {
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">

@@ -531,7 +531,9 @@ export class S3Client {
         }
 
         const error = await createError(response);
-        response.body?.cancel?.();
+        if (!response.bodyUsed) {
+          response.body?.cancel?.();
+        }
 
         if (
           !this.shouldRetry(
@@ -1105,36 +1107,39 @@ async function readErrorBody(response: Response): Promise<string | undefined> {
   if (!response.body) {
     return undefined;
   }
-  const clone = response.clone();
-  const reader = clone.body?.getReader();
-  if (!reader) {
-    return undefined;
-  }
+
+  const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
   const limit = 64 * 1024;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done || !value) {
-      break;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done || !value) {
+        break;
+      }
+      if (value.byteLength === 0) {
+        continue;
+      }
+      if (total >= limit) {
+        await reader.cancel();
+        break;
+      }
+      const remaining = limit - total;
+      const chunk =
+        value.byteLength > remaining ? value.subarray(0, remaining) : value;
+      chunks.push(chunk);
+      total += chunk.byteLength;
+      if (total >= limit) {
+        await reader.cancel();
+        break;
+      }
     }
-    if (value.byteLength === 0) {
-      continue;
-    }
-    if (total >= limit) {
-      await reader.cancel();
-      break;
-    }
-    const remaining = limit - total;
-    const chunk =
-      value.byteLength > remaining ? value.subarray(0, remaining) : value;
-    chunks.push(chunk);
-    total += chunk.byteLength;
-    if (total >= limit) {
-      await reader.cancel();
-      break;
-    }
+  } finally {
+    reader.releaseLock();
   }
+
   if (chunks.length === 0) {
     return undefined;
   }
