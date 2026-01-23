@@ -233,6 +233,50 @@ describe("S3Client", () => {
     });
   });
 
+  it("filters disallowed headers from error cause", async () => {
+    const errorXml = `<?xml version="1.0" encoding="UTF-8"?>
+<Error>
+  <Code>BadRequest</Code>
+  <Message>Bad Request</Message>
+</Error>`;
+
+    const fetchMock = createFetchMock(async () => {
+      return new Response(errorXml, {
+        status: 400,
+        headers: {
+          "x-custom-header": "allowed",
+          "content-length": "123",
+          "content-type": "application/xml",
+          "x-amz-request-id": "123",
+        },
+      });
+    });
+
+    const client = new S3Client({
+      region: "us-east-1",
+      endpoint: "https://s3.us-east-1.amazonaws.com",
+      credentials,
+      fetch: fetchMock,
+    });
+
+    const promise = client.get({ bucket: "my-bucket", key: "bad.txt" });
+    try {
+      await promise;
+      expect.fail("Should have thrown S3Error");
+    } catch (error) {
+      expect(error).toBeInstanceOf(S3Error);
+      const s3Error = error as S3Error;
+      expect(s3Error.cause).toBeDefined();
+      const cause = s3Error.cause as { headers: Record<string, string> };
+      const headers = cause.headers;
+
+      expect(headers["x-custom-header"]).toBe("allowed");
+      expect(headers["x-amz-request-id"]).toBe("123");
+      expect(headers["content-length"]).toBeUndefined();
+      expect(headers["content-type"]).toBeUndefined();
+    }
+  });
+
   it("presigns requests with expected query parameters", async () => {
     const client = new S3Client({
       region: "us-east-1",

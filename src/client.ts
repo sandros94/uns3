@@ -33,6 +33,7 @@ import type {
 } from "./types";
 import { S3Error } from "./error";
 import { isPlainObject } from "./utils/is";
+import { DISALLOWED_ERROR_HEADERS } from "./core/defaults";
 
 interface RequestOptions {
   body?: BodyInit | ReadableStream<Uint8Array> | null;
@@ -1078,6 +1079,9 @@ async function createError(response: Response): Promise<S3Error> {
   const headersRecord: Record<string, string> = {};
   // eslint-disable-next-line unicorn/no-array-for-each
   response.headers.forEach((value, key) => {
+    if (DISALLOWED_ERROR_HEADERS.has(key.toLowerCase())) {
+      return;
+    }
     headersRecord[key] = value;
   });
 
