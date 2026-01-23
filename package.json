@@ -32,8 +32,8 @@
   "scripts": {
     "build": "obuild",
     "dev": "npx --yes listhen -w ./playground/main.ts",
-    "lint": "eslint . && prettier -c .",
-    "lint:fix": "automd && eslint . --fix && prettier -w .",
+    "lint": "eslint --cache . && prettier -c src test docs",
+    "lint:fix": "automd && eslint --cache . --fix && prettier -c src test docs -w .",
     "prepack": "pnpm build",
     "release": "pnpm test && pnpm prepack && changelogen --release --push",
     "test": "pnpm lint && pnpm test:types && vitest run",
