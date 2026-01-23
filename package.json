@@ -12,16 +12,12 @@
   },
   "exports": {
     "./package.json": "./package.json",
-    "./core": {
-      "types": "./dist/core/index.d.mts",
-      "default": "./dist/core/index.mjs"
-    },
-    "./utils": {
-      "types": "./dist/utils/index.d.mts",
-      "default": "./dist/utils/index.mjs"
-    },
+    "./core": "./dist/core.mjs",
+    "./utils": "./dist/utils.mjs",
     ".": {
       "types": "./dist/index.d.mts",
+      "core": "./dist/core.mjs",
+      "utils": "./dist/utils.mjs",
       "default": "./dist/index.mjs"
     }
   },

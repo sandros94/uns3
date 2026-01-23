@@ -1,4 +1,4 @@
-import type { TransportOptions, TransportResult } from "../types.ts";
+import type { TransportOptions, TransportResult } from "../../types.ts";
 
 /**
  * Dispatches the request via the configured fetch implementation.

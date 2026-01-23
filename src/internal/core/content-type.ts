@@ -1,4 +1,4 @@
-import type { ContentTypeResolver } from "../types.ts";
+import type { ContentTypeResolver } from "../../types.ts";
 import { lookup } from "../utils/mime.ts";
 
 /**

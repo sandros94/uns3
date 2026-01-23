@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   defaultContentTypeResolver,
   resolveContentType,
-} from "../../src/core/content-type.ts";
+} from "../../src/core.ts";
 
 describe("content type resolver", () => {
   it("prefers explicit content type", () => {

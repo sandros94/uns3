@@ -2,7 +2,7 @@ import { createHash, createHmac } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { presignUrl, signRequest } from "../../src/core/signer.ts";
+import { presignUrl, signRequest } from "../../src/core.ts";
 import type { Credentials } from "../../src/types.ts";
 
 const credentials: Credentials = {

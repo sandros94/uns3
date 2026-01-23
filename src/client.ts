@@ -9,7 +9,7 @@ import {
   send,
   signRequest,
   isPayloadStream,
-} from "./core/index.ts";
+} from "./core.ts";
 import type {
   Methods,
   ContentTypeResolver,
@@ -33,7 +33,7 @@ import type {
   UploadPartResult,
 } from "./types.ts";
 import { S3Error } from "./error.ts";
-import { isPlainObject } from "./utils/is.ts";
+import { isPlainObject } from "./utils.ts";
 
 interface RequestOptions {
   body?: BodyInit | ReadableStream<Uint8Array> | null;
