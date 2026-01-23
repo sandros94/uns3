@@ -1,11 +1,11 @@
-import type { Credentials, Methods } from "../types";
+import type { Credentials, Methods } from "../types.ts";
 import {
   uriEncode,
   isArrayBuffer,
   isArrayBufferView,
   isBlob,
   isReadableStream,
-} from "../utils";
+} from "../utils/index.ts";
 
 const encoder = new TextEncoder();
 const SERVICE = "s3";

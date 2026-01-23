@@ -1,43 +1,14 @@
-import { defineBuildConfig } from "unbuild";
-import { readdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { defineBuildConfig } from "obuild/config";
 
 export default defineBuildConfig({
   entries: [
-    "./src/index",
     {
-      input: "./src/core",
-      outDir: "./dist/core",
-      name: "core",
-    },
-    {
-      input: "./src/utils",
-      outDir: "./dist/utils",
-      name: "utils",
+      type: "bundle",
+      input: [
+        "./src/index.ts",
+        "./src/core/index.ts",
+        "./src/utils/index.ts",
+      ],
     },
   ],
-  declaration: true,
-  hooks: {
-    async "build:done"() {
-      await removeDtsFiles("dist");
-    },
-  },
 });
-
-async function removeDtsFiles(directory: string) {
-  try {
-    const items = await readdir(directory, { recursive: true });
-    for (const item of items) {
-      const itemPath = join(directory, item);
-
-      if (item.endsWith(".d.ts")) {
-        await rm(itemPath);
-      }
-    }
-  } catch (error) {
-    if ((error as any).code === "ENOENT" || (error as any).code === "ENOTDIR") {
-      return;
-    }
-    console.error(`Error processing ${directory}: ${error}`);
-  }
-}

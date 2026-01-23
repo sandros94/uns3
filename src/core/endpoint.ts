@@ -1,5 +1,5 @@
-import type { BucketStyle } from "../types";
-import { uriEncode, isDnsCompatibleBucketName } from "../utils";
+import type { BucketStyle } from "../types.ts";
+import { uriEncode, isDnsCompatibleBucketName } from "../utils/index.ts";
 
 type EndpointStyle<T extends BucketStyle = BucketStyle> = T extends "virtual"
   ? { bucket?: string; bucketStyle: "virtual" }

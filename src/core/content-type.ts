@@ -1,5 +1,5 @@
-import type { ContentTypeResolver } from "../types";
-import { lookup } from "../utils/mime";
+import type { ContentTypeResolver } from "../types.ts";
+import { lookup } from "../utils/mime.ts";
 
 /**
  * Default resolver that infers a content type for a key using explicit

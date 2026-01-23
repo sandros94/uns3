@@ -1,3 +1,3 @@
-export { mimes, lookup as lookupMime } from "./mime";
-export * from "./encode";
-export * from "./is";
+export { mimes, lookup as lookupMime } from "./mime.ts";
+export * from "./encode.ts";
+export * from "./is.ts";

@@ -11,19 +11,26 @@
     "email": "sandro.circi@digitoolmedia.com"
   },
   "exports": {
+    "./package.json": "./package.json",
+    "./core": {
+      "types": "./dist/core/index.d.mts",
+      "default": "./dist/core/index.mjs"
+    },
+    "./utils": {
+      "types": "./dist/utils/index.d.mts",
+      "default": "./dist/utils/index.mjs"
+    },
     ".": {
       "types": "./dist/index.d.mts",
       "default": "./dist/index.mjs"
     }
   },
-  "main": "./dist/index.mjs",
-  "module": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "unbuild",
+    "build": "obuild",
     "dev": "npx --yes listhen -w ./playground/main.ts",
     "lint": "eslint . && prettier -c .",
     "lint:fix": "automd && eslint . --fix && prettier -w .",
@@ -44,9 +51,9 @@
     "changelogen": "^0.6.2",
     "eslint": "^9.39.2",
     "eslint-config-unjs": "^0.6.2",
+    "obuild": "^0.4.20",
     "prettier": "^3.8.0",
     "typescript": "^5.9.3",
-    "unbuild": "^3.6.1",
     "vitest": "^4.0.17"
   },
   "engines": {

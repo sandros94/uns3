@@ -1,5 +1,5 @@
-import type { BaseRequest, ByteRange, PutObjectParams } from "../types";
-import { isReadableStream } from "../utils";
+import type { BaseRequest, ByteRange, PutObjectParams } from "../types.ts";
+import { isReadableStream } from "../utils/index.ts";
 
 export interface HeaderBuildOptions {
   headers?: HeadersInit;

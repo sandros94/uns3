@@ -1,4 +1,5 @@
 import {
+  DISALLOWED_ERROR_HEADERS,
   buildRequestUrl,
   applyQuery,
   createHeaders,
@@ -8,7 +9,7 @@ import {
   send,
   signRequest,
   isPayloadStream,
-} from "./core";
+} from "./core/index.ts";
 import type {
   Methods,
   ContentTypeResolver,
@@ -30,10 +31,9 @@ import type {
   ChecksumConfig,
   UploadPartParams,
   UploadPartResult,
-} from "./types";
-import { S3Error } from "./error";
-import { isPlainObject } from "./utils/is";
-import { DISALLOWED_ERROR_HEADERS } from "./core/defaults";
+} from "./types.ts";
+import { S3Error } from "./error.ts";
+import { isPlainObject } from "./utils/is.ts";
 
 interface RequestOptions {
   body?: BodyInit | ReadableStream<Uint8Array> | null;
