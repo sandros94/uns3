@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildRequestUrl, encodeS3Key } from "../../src/core/endpoint";
+import { buildRequestUrl, encodeS3Key } from "../../src/core/endpoint.ts";
 
 describe("endpoint builder", () => {
   it("uses virtual-hosted style by default", () => {

@@ -2,8 +2,8 @@ import { createHash, createHmac } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { presignUrl, signRequest } from "../../src/core/signer";
-import type { Credentials } from "../../src/types";
+import { presignUrl, signRequest } from "../../src/core/signer.ts";
+import type { Credentials } from "../../src/types.ts";
 
 const credentials: Credentials = {
   accessKeyId: "AKIDEXAMPLE",

@@ -11,8 +11,7 @@ import {
   vi,
 } from "vitest";
 
-import { S3Client, S3Error } from "../src";
-import type { Credentials } from "../src/types";
+import { type Credentials, S3Client, S3Error } from "../src/index.ts";
 
 const credentials: Credentials = {
   accessKeyId: "AKIDEXAMPLE",
