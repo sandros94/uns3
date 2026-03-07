@@ -389,7 +389,5 @@ function toHex(data: ArrayBuffer): string {
   if (_hasToHex) {
     return (bytes as any).toHex();
   }
-  return Array.prototype.map
-    .call(bytes, (x: number) => ("00" + x.toString(16)).slice(-2))
-    .join("");
+  return Array.prototype.map.call(bytes, (x: number) => ("00" + x.toString(16)).slice(-2)).join("");
 }
