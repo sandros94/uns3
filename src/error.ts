@@ -12,7 +12,6 @@ export class S3Error extends Error {
   readonly resource?: string;
   readonly region?: string;
   readonly bucketRegion?: string;
-  readonly cause?: unknown;
 
   /**
    * @param init - Metadata describing the failure returned by S3.
