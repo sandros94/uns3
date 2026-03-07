@@ -1,12 +1,8 @@
 # uns3
 
-<!-- automd:badges bundlephobia style="flat" color="FFDC3B" -->
-
-[![npm version](https://img.shields.io/npm/v/uns3?color=FFDC3B)](https://npmjs.com/package/uns3)
-[![npm downloads](https://img.shields.io/npm/dm/uns3?color=FFDC3B)](https://npm.chart.dev/uns3)
-[![bundle size](https://img.shields.io/bundlephobia/minzip/uns3?color=FFDC3B)](https://bundlephobia.com/package/uns3)
-
-<!-- /automd -->
+[![npm version](https://npmx.dev/api/registry/badge/version/uns3?name=true)](https://npmx.dev/package/uns3)
+[![npm downloads](https://npmx.dev/api/registry/badge/downloads/uns3)](https://npmx.dev/package/uns3)
+[![bundle size](https://npmx.dev/api/registry/badge/size/uns3)](https://npmx.dev/package/uns3)
 
 Tiny, runtime-agnostic, S3 client.
 
