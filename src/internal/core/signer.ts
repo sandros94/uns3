@@ -270,13 +270,19 @@ function buildCanonicalRequest(
   ].join("\n");
 }
 
+/**
+ * Builds the canonical URI for SigV4 signing.
+ *
+ * Segments are decoded then re-encoded to prevent double-encoding:
+ * `URL.pathname` may already contain percent-encoded characters (e.g. `%20`),
+ * so a naive `uriEncode(part)` would produce `%2520`. By decoding first we
+ * normalise to raw characters, then apply a single RFC 3986 encoding pass.
+ */
 function getCanonicalUri(pathname: string): string {
   if (!pathname) return "/";
   const encodedPath = pathname
     .split("/")
     .map((part) => {
-      // Decode first to avoid double-encoding already-encoded segments
-      // This handles cases where URL.pathname contains encoded characters
       if (!part) return part;
       try {
         const decoded = decodeURIComponent(part);

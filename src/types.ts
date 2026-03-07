@@ -100,6 +100,7 @@ export interface UploadPartParams extends BaseRequest {
   uploadId: string;
   partNumber: number;
   body: BodyInit | ReadableStream<Uint8Array> | null;
+  /** Hint for providers that require an explicit Content-Length header. Not validated against the actual body size — the caller is responsible for accuracy. */
   contentLength?: number;
 }
 
