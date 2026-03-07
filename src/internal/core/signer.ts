@@ -372,14 +372,24 @@ async function sha256Hex(data: Uint8Array<ArrayBuffer>): Promise<string> {
   return toHex(buffer);
 }
 
+const _Buffer: BufferConstructor | undefined = /* @__PURE__ */ (() => {
+  try {
+    return globalThis.Buffer;
+  } catch {
+    return undefined;
+  }
+})();
+const _hasBuffer: boolean = typeof _Buffer?.from === "function";
+const _hasToHex = !_hasBuffer && typeof (Uint8Array.prototype as any).toHex === "function";
 function toHex(data: ArrayBuffer): string {
   const bytes = new Uint8Array(data);
-
-  // @ts-expect-error check if toHex is available
-  if (Uint8Array.prototype.toHex) {
-    // @ts-expect-error
-    return bytes.toHex();
+  if (_hasBuffer) {
+    return _Buffer!.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("hex");
   }
-
-  return Array.prototype.map.call(bytes, (x: number) => ("00" + x.toString(16)).slice(-2)).join("");
+  if (_hasToHex) {
+    return (bytes as any).toHex();
+  }
+  return Array.prototype.map
+    .call(bytes, (x: number) => ("00" + x.toString(16)).slice(-2))
+    .join("");
 }
