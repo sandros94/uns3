@@ -21,9 +21,7 @@ describe("signer", () => {
   });
 
   it("produces deterministic authorization headers", async () => {
-    const url = new URL(
-      "https://my-bucket.s3.us-east-1.amazonaws.com/test.txt",
-    );
+    const url = new URL("https://my-bucket.s3.us-east-1.amazonaws.com/test.txt");
 
     const result = await signRequest({
       method: "GET",
@@ -52,9 +50,7 @@ describe("signer", () => {
       result.payloadHash,
     ].join("\n");
 
-    const canonicalHash = createHash("sha256")
-      .update(canonicalRequest, "utf8")
-      .digest("hex");
+    const canonicalHash = createHash("sha256").update(canonicalRequest, "utf8").digest("hex");
     const stringToSign = [
       "AWS4-HMAC-SHA256",
       result.amzDate,
@@ -62,12 +58,7 @@ describe("signer", () => {
       canonicalHash,
     ].join("\n");
 
-    const signingKey = deriveSigningKey(
-      credentials.secretAccessKey,
-      "20230102",
-      "us-east-1",
-      "s3",
-    );
+    const signingKey = deriveSigningKey(credentials.secretAccessKey, "20230102", "us-east-1", "s3");
     const expectedSignature = createHmac("sha256", signingKey)
       .update(stringToSign, "utf8")
       .digest("hex");
@@ -78,9 +69,7 @@ describe("signer", () => {
   });
 
   it("presigns URLs with stable signature", async () => {
-    const url = new URL(
-      "https://my-bucket.s3.us-east-1.amazonaws.com/test.txt",
-    );
+    const url = new URL("https://my-bucket.s3.us-east-1.amazonaws.com/test.txt");
 
     const { url: presigned } = await presignUrl({
       method: "GET",
@@ -95,18 +84,14 @@ describe("signer", () => {
     const params = parsed.searchParams;
     expect(params.get("X-Amz-Algorithm")).toBe("AWS4-HMAC-SHA256");
     const credential = params.get("X-Amz-Credential");
-    expect(credential).toBe(
-      `${credentials.accessKeyId}/20230102/us-east-1/s3/aws4_request`,
-    );
+    expect(credential).toBe(`${credentials.accessKeyId}/20230102/us-east-1/s3/aws4_request`);
     const signature = params.get("X-Amz-Signature");
     expect(signature).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it("handles keys with special characters without double-encoding", async () => {
     // Test with a key containing spaces
-    const url = new URL(
-      "https://my-bucket.s3.us-east-1.amazonaws.com/my%20file%20name.txt",
-    );
+    const url = new URL("https://my-bucket.s3.us-east-1.amazonaws.com/my%20file%20name.txt");
 
     const result = await signRequest({
       method: "GET",
@@ -139,18 +124,9 @@ describe("signer", () => {
   });
 });
 
-function deriveSigningKey(
-  secret: string,
-  date: string,
-  region: string,
-  service: string,
-): Buffer {
-  const kDate = createHmac("sha256", `AWS4${secret}`)
-    .update(date, "utf8")
-    .digest();
+function deriveSigningKey(secret: string, date: string, region: string, service: string): Buffer {
+  const kDate = createHmac("sha256", `AWS4${secret}`).update(date, "utf8").digest();
   const kRegion = createHmac("sha256", kDate).update(region, "utf8").digest();
-  const kService = createHmac("sha256", kRegion)
-    .update(service, "utf8")
-    .digest();
+  const kService = createHmac("sha256", kRegion).update(service, "utf8").digest();
   return createHmac("sha256", kService).update("aws4_request", "utf8").digest();
 }

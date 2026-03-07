@@ -1,15 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  defaultContentTypeResolver,
-  resolveContentType,
-} from "../../src/core.ts";
+import { defaultContentTypeResolver, resolveContentType } from "../../src/core.ts";
 
 describe("content type resolver", () => {
   it("prefers explicit content type", () => {
-    expect(defaultContentTypeResolver("file.txt", "application/custom")).toBe(
-      "application/custom",
-    );
+    expect(defaultContentTypeResolver("file.txt", "application/custom")).toBe("application/custom");
   });
 
   it("infers from key when explicit missing", () => {
@@ -17,10 +12,7 @@ describe("content type resolver", () => {
   });
 
   it("can be overridden with custom resolver", () => {
-    const resolver = (key: string) =>
-      key.endsWith(".data") ? "application/x-data" : undefined;
-    expect(resolveContentType("document.data", undefined, resolver)).toBe(
-      "application/x-data",
-    );
+    const resolver = (key: string) => (key.endsWith(".data") ? "application/x-data" : undefined);
+    expect(resolveContentType("document.data", undefined, resolver)).toBe("application/x-data");
   });
 });

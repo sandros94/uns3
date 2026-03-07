@@ -126,7 +126,7 @@ Design a runtime-agnostic, minimal-deps, S3-compatible client with strong defaul
 - Features:
   - Checksum optional policy (SHA-256 hashing on PUT only when enabled and body is small enough)
   - Path-style vs virtual-hosted style selection, plus automatic fallback when bucket name is not DNS-compliant
-  - Range GET and conditional requests (If-*, If-None-Match, If-Modified-Since)
+  - Range GET and conditional requests (If-\*, If-None-Match, If-Modified-Since)
   - Basic retry policy with exponential backoff for 5xx, throttling, and idempotent GET/HEAD
   - Clock skew correction using Date and server Date headers
 - Tests:
@@ -149,7 +149,7 @@ Design a runtime-agnostic, minimal-deps, S3-compatible client with strong defaul
   - Retry individual part PUTs
   - Preserve part order for completion payload
 - Tests:
-  - Various payload sizes across boundaries (exact 5 MiB, N*partSize, final smaller part)
+  - Various payload sizes across boundaries (exact 5 MiB, N\*partSize, final smaller part)
   - Abort on failure
 
 4. Additional non-vendor-specific enhancements

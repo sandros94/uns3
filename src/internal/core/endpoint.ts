@@ -8,11 +8,10 @@ type EndpointStyle<T extends BucketStyle = BucketStyle> = T extends "virtual"
     ? { bucket: string; bucketStyle: "path" }
     : never;
 
-export type EndpointInput<T extends BucketStyle = BucketStyle> =
-  EndpointStyle<T> & {
-    key: string;
-    endpoint: string;
-  };
+export type EndpointInput<T extends BucketStyle = BucketStyle> = EndpointStyle<T> & {
+  key: string;
+  endpoint: string;
+};
 
 /**
  * Builds a request URL for the given bucket/key combo respecting the desired
@@ -20,9 +19,7 @@ export type EndpointInput<T extends BucketStyle = BucketStyle> =
  *
  * @param input - Endpoint components including style, bucket, and key.
  */
-export function buildRequestUrl<T extends BucketStyle>(
-  input: EndpointInput<T>,
-): URL {
+export function buildRequestUrl<T extends BucketStyle>(input: EndpointInput<T>): URL {
   const { endpoint, bucketStyle, bucket, key } = input;
   const base = new URL(endpoint);
   const effectiveStyle = resolveBucketStyle(bucketStyle, bucket, base.hostname);

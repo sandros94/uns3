@@ -8,10 +8,7 @@ import { lookup } from "../utils/mime.ts";
  * @param key - Object key whose extension drives detection.
  * @param explicit - Optional override supplied by the caller.
  */
-export const defaultContentTypeResolver: ContentTypeResolver = (
-  key,
-  explicit,
-) => {
+export const defaultContentTypeResolver: ContentTypeResolver = (key, explicit) => {
   if (explicit === false) {
     return undefined;
   }

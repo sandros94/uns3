@@ -87,9 +87,7 @@ export function applyQuery(url: URL, query: BaseRequest["query"]): void {
  *
  * @param body - Supplied upload body.
  */
-export function isPayloadStream(
-  body: PutObjectParams["body"],
-): body is ReadableStream<Uint8Array> {
+export function isPayloadStream(body: PutObjectParams["body"]): body is ReadableStream<Uint8Array> {
   return isReadableStream(body);
 }
 
@@ -97,8 +95,7 @@ export function isPayloadStream(
 
 function normalizeQueryValue(value: string | number | boolean): string {
   if (typeof value === "string") return value;
-  if (typeof value === "number")
-    return Number.isFinite(value) ? value.toString() : "";
+  if (typeof value === "number") return Number.isFinite(value) ? value.toString() : "";
   return value ? "true" : "false";
 }
 
@@ -149,9 +146,7 @@ function setMultiValueHeader(
   }
 }
 
-function normalizeHeaderValues(
-  value: string | string[] | undefined,
-): string | undefined {
+function normalizeHeaderValues(value: string | string[] | undefined): string | undefined {
   if (value === undefined) {
     return undefined;
   }

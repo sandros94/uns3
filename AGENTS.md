@@ -23,6 +23,7 @@ uns3 is a tiny, zero-dependency, runtime-agnostic S3 client that works across No
 ### Entry points and exports
 
 The package has three export paths defined in `package.json`:
+
 - `.` → `src/index.ts` — re-exports `S3Client`, `S3Error`, all types, and `utils` namespace
 - `./core` → `src/core.ts` — re-exports low-level internal core modules (signer, serializer, endpoint, transport, content-type, defaults)
 - `./utils` → `src/utils.ts` — re-exports utility functions (MIME lookup, URI encoding, type guards)

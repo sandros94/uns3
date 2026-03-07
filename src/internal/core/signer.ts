@@ -1,11 +1,6 @@
 import type { Credentials, Methods } from "../../types.ts";
 import { uriEncode } from "../utils/encode.ts";
-import {
-  isArrayBuffer,
-  isArrayBufferView,
-  isBlob,
-  isReadableStream,
-} from "../utils/is.ts";
+import { isArrayBuffer, isArrayBufferView, isBlob, isReadableStream } from "../utils/is.ts";
 
 const encoder = new TextEncoder();
 const SERVICE = "s3";
@@ -52,9 +47,7 @@ export interface PresignResult {
  *
  * @param input - Method, URL, credentials, headers, body, and signing options.
  */
-export async function signRequest(
-  input: SignRequestInput,
-): Promise<SignRequestResult> {
+export async function signRequest(input: SignRequestInput): Promise<SignRequestResult> {
   const { credentials, region } = input;
   const date = input.datetime ?? new Date();
   const { amzDate, shortDate } = formatAmzDate(date);
@@ -79,16 +72,10 @@ export async function signRequest(
     payloadHash,
   );
 
-  const canonicalRequestHash = await sha256Hex(
-    encoder.encode(canonicalRequest),
-  );
+  const canonicalRequestHash = await sha256Hex(encoder.encode(canonicalRequest));
   const credentialScope = `${shortDate}/${region}/${SERVICE}/aws4_request`;
 
-  const stringToSign = buildStringToSign(
-    amzDate,
-    credentialScope,
-    canonicalRequestHash,
-  );
+  const stringToSign = buildStringToSign(amzDate, credentialScope, canonicalRequestHash);
   const signature = await calculateSignature(
     credentials.secretAccessKey,
     shortDate,
@@ -155,14 +142,8 @@ export async function presignUrl(input: PresignInput): Promise<PresignResult> {
     payloadHash,
   );
 
-  const canonicalRequestHash = await sha256Hex(
-    encoder.encode(canonicalRequest),
-  );
-  const stringToSign = buildStringToSign(
-    amzDate,
-    credentialScope,
-    canonicalRequestHash,
-  );
+  const canonicalRequestHash = await sha256Hex(encoder.encode(canonicalRequest));
+  const stringToSign = buildStringToSign(amzDate, credentialScope, canonicalRequestHash);
   const signature = await calculateSignature(
     credentials.secretAccessKey,
     shortDate,
@@ -181,10 +162,7 @@ export async function presignUrl(input: PresignInput): Promise<PresignResult> {
 
 // #region Internal
 
-async function resolvePayloadHash(
-  input: SignRequestInput,
-  headers: Headers,
-): Promise<string> {
+async function resolvePayloadHash(input: SignRequestInput, headers: Headers): Promise<string> {
   if (input.unsignedPayload) return UNSIGNED_PAYLOAD;
 
   const existing = headers.get("x-amz-content-sha256");
@@ -204,11 +182,7 @@ async function resolvePayloadHash(
 
   if (isArrayBufferView(input.body)) {
     return await sha256Hex(
-      new Uint8Array(
-        input.body.buffer,
-        input.body.byteOffset,
-        input.body.byteLength,
-      ),
+      new Uint8Array(input.body.buffer, input.body.byteOffset, input.body.byteLength),
     );
   }
 
@@ -226,8 +200,7 @@ async function resolvePayloadHash(
 
 async function resolvePresignPayloadHash(input: PresignInput): Promise<string> {
   if (input.unsignedPayload) return UNSIGNED_PAYLOAD;
-  if (input.method === "GET" || input.method === "HEAD")
-    return UNSIGNED_PAYLOAD;
+  if (input.method === "GET" || input.method === "HEAD") return UNSIGNED_PAYLOAD;
   return await sha256Hex(encoder.encode(""));
 }
 
@@ -270,9 +243,7 @@ function canonicalizeHeaders(headers: Headers): {
   });
 
   const sortedKeys = [...headerMap.keys()].sort();
-  const canonical = sortedKeys
-    .map((key) => `${key}:${headerMap.get(key)!.join(",")}`)
-    .join("\n");
+  const canonical = sortedKeys.map((key) => `${key}:${headerMap.get(key)!.join(",")}`).join("\n");
   const signedHeaders = sortedKeys.join(";");
   return {
     canonical: canonical + "\n",
@@ -325,21 +296,10 @@ function getCanonicalQuery(params: URLSearchParams): string {
     entries.push({ key, value });
   }
   entries.sort((a, b) =>
-    a.key === b.key
-      ? a.value < b.value
-        ? -1
-        : a.value > b.value
-          ? 1
-          : 0
-      : a.key < b.key
-        ? -1
-        : 1,
+    a.key === b.key ? (a.value < b.value ? -1 : a.value > b.value ? 1 : 0) : a.key < b.key ? -1 : 1,
   );
   return entries
-    .map(
-      (entry) =>
-        `${uriEncode(entry.key, true)}=${uriEncode(entry.value, true)}`,
-    )
+    .map((entry) => `${uriEncode(entry.key, true)}=${uriEncode(entry.value, true)}`)
     .join("&");
 }
 
@@ -357,10 +317,7 @@ async function calculateSignature(
   return toHex(rawSignature);
 }
 
-async function hmac(
-  key: string | ArrayBuffer,
-  data: string,
-): Promise<ArrayBuffer> {
+async function hmac(key: string | ArrayBuffer, data: string): Promise<ArrayBuffer> {
   const keyData = typeof key === "string" ? encoder.encode(key) : key;
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
@@ -424,7 +381,5 @@ function toHex(data: ArrayBuffer): string {
     return bytes.toHex();
   }
 
-  return Array.prototype.map
-    .call(bytes, (x: number) => ("00" + x.toString(16)).slice(-2))
-    .join("");
+  return Array.prototype.map.call(bytes, (x: number) => ("00" + x.toString(16)).slice(-2)).join("");
 }

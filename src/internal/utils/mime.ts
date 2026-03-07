@@ -453,7 +453,5 @@ export const mimes = {
 export function lookup(extn: string): string | undefined {
   const tmp = ("" + extn).trim().toLowerCase();
   let idx = tmp.lastIndexOf(".");
-  return mimes[
-    (~idx ? tmp.slice(Math.max(0, ++idx)) : tmp) as keyof typeof mimes
-  ];
+  return mimes[(~idx ? tmp.slice(Math.max(0, ++idx)) : tmp) as keyof typeof mimes];
 }

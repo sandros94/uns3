@@ -1,9 +1,5 @@
-export type UppercaseOrLowercase<T extends string> =
-  | Uppercase<T>
-  | Lowercase<T>;
-export type Methods = UppercaseOrLowercase<
-  "GET" | "HEAD" | "POST" | "PUT" | "DELETE"
->;
+export type UppercaseOrLowercase<T extends string> = Uppercase<T> | Lowercase<T>;
+export type Methods = UppercaseOrLowercase<"GET" | "HEAD" | "POST" | "PUT" | "DELETE">;
 
 export type Credentials = {
   accessKeyId: string;
@@ -58,11 +54,7 @@ export interface BaseRequest {
   headers?: HeadersInit;
   query?: Record<
     string,
-    | string
-    | number
-    | boolean
-    | undefined
-    | Array<string | number | boolean | undefined>
+    string | number | boolean | undefined | Array<string | number | boolean | undefined>
   >;
   expectedStatus?: number | number[];
   signal?: AbortSignal;
@@ -154,10 +146,7 @@ export interface PresignParams extends BaseRequest {
   expiresInSeconds?: number;
 }
 
-export type ContentTypeResolver = (
-  key: string,
-  explicit?: string | false,
-) => string | undefined;
+export type ContentTypeResolver = (key: string, explicit?: string | false) => string | undefined;
 
 export interface SignedRequestMetadata {
   authorization: string;

@@ -1,15 +1,6 @@
 import { createHash } from "node:crypto";
 
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type Credentials, S3Client, S3Error } from "../src/index.ts";
 
@@ -72,9 +63,7 @@ describe("S3Client", () => {
     const headers = capturedRequest!.headers;
     expect(headers.get("content-type")).toBe("application/json");
     const payloadHash = headers.get("x-amz-content-sha256");
-    expect(payloadHash).toBe(
-      createHash("sha256").update('{"hello":true}', "utf8").digest("hex"),
-    );
+    expect(payloadHash).toBe(createHash("sha256").update('{"hello":true}', "utf8").digest("hex"));
     expect(headers.get("authorization")).toMatch(/^AWS4-HMAC-SHA256/);
   });
 
@@ -296,9 +285,7 @@ describe("S3Client", () => {
     );
     expect(parsed.searchParams.get("X-Amz-SignedHeaders")).toBe("host");
     expect(parsed.searchParams.get("X-Amz-Expires")).toBe("900");
-    expect(parsed.searchParams.get("X-Amz-Signature")).toMatch(
-      /^[a-f0-9]{64}$/,
-    );
+    expect(parsed.searchParams.get("X-Amz-Signature")).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it("applies range and conditional headers", async () => {
@@ -330,12 +317,8 @@ describe("S3Client", () => {
     expect(headers.get("range")).toBe("bytes=0-99");
     expect(headers.get("if-match")).toBe('"etag-1", "etag-2"');
     expect(headers.get("if-none-match")).toBe("not-match");
-    expect(headers.get("if-modified-since")).toBe(
-      "Sun, 01 Jan 2023 00:00:00 GMT",
-    );
-    expect(headers.get("if-unmodified-since")).toBe(
-      "Wed, 01 Feb 2023 00:00:00 GMT",
-    );
+    expect(headers.get("if-modified-since")).toBe("Sun, 01 Jan 2023 00:00:00 GMT");
+    expect(headers.get("if-unmodified-since")).toBe("Wed, 01 Feb 2023 00:00:00 GMT");
   });
 
   it("treats 304 Not Modified as success for GET requests", async () => {
@@ -403,23 +386,20 @@ describe("S3Client", () => {
 </Error>`;
 
     const requests: Request[] = [];
-    const fetchMock = vi.fn(
-      async (input: RequestInfo | URL, init?: RequestInit) => {
-        const request =
-          input instanceof Request ? input : new Request(input, init);
-        requests.push(request);
-        if (requests.length === 1) {
-          return new Response(errorXml, {
-            status: 403,
-            headers: {
-              date: "Wed, 01 Feb 2023 00:00:00 GMT",
-              "content-type": "application/xml",
-            },
-          });
-        }
-        return new Response("ok", { status: 200 });
-      },
-    );
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requests.push(request);
+      if (requests.length === 1) {
+        return new Response(errorXml, {
+          status: 403,
+          headers: {
+            date: "Wed, 01 Feb 2023 00:00:00 GMT",
+            "content-type": "application/xml",
+          },
+        });
+      }
+      return new Response("ok", { status: 200 });
+    });
 
     const client = new S3Client({
       region: "us-east-1",
@@ -490,9 +470,7 @@ describe("S3Client", () => {
       body: stream,
     });
 
-    await expect(promise).rejects.toThrow(
-      /Unable to compute sha256 checksum for PUT payload/i,
-    );
+    await expect(promise).rejects.toThrow(/Unable to compute sha256 checksum for PUT payload/i);
   });
 
   it("surfaces retry metadata on structured errors", async () => {
@@ -610,21 +588,16 @@ describe("S3Client", () => {
     const url = new URL(request.url);
     expect(url.searchParams.get("uploadId")).toBe("upload-123");
     expect(url.searchParams.get("partNumber")).toBe("1");
-    expect(request.headers.get("content-length")).toBe(
-      String(payload.byteLength),
-    );
+    expect(request.headers.get("content-length")).toBe(String(payload.byteLength));
   });
 
   it("completes multipart uploads with sorted XML body", async () => {
     let captured: Request | undefined;
     const fetchMock = createFetchMock(async (request) => {
       captured = request;
-      return new Response(
-        "<CompleteMultipartUploadResult></CompleteMultipartUploadResult>",
-        {
-          status: 200,
-        },
-      );
+      return new Response("<CompleteMultipartUploadResult></CompleteMultipartUploadResult>", {
+        status: 200,
+      });
     });
 
     const client = new S3Client({
@@ -753,9 +726,7 @@ integrationSuite("S3Client integration (real bucket)", () => {
       credentials: {
         accessKeyId: integrationEnv.accessKeyId!,
         secretAccessKey: integrationEnv.secretAccessKey!,
-        ...(integrationEnv.sessionToken
-          ? { sessionToken: integrationEnv.sessionToken }
-          : {}),
+        ...(integrationEnv.sessionToken ? { sessionToken: integrationEnv.sessionToken } : {}),
       },
     });
   });
@@ -887,9 +858,7 @@ integrationSuite("S3Client integration (real bucket)", () => {
       completed = true;
     } finally {
       if (!completed) {
-        await client
-          .abortMultipart({ bucket, key, uploadId: init.uploadId })
-          .catch(() => {});
+        await client.abortMultipart({ bucket, key, uploadId: init.uploadId }).catch(() => {});
       }
     }
   });

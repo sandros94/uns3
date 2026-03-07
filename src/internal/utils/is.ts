@@ -24,12 +24,8 @@ export function isBlob(value: unknown): value is Blob {
 /**
  * Type guard detecting Web {@link ReadableStream} objects.
  */
-export function isReadableStream(
-  value: unknown,
-): value is ReadableStream<Uint8Array> {
-  return (
-    typeof ReadableStream !== "undefined" && value instanceof ReadableStream
-  );
+export function isReadableStream(value: unknown): value is ReadableStream<Uint8Array> {
+  return typeof ReadableStream !== "undefined" && value instanceof ReadableStream;
 }
 
 const IP_ADDRESS_REGEX = /^(\d{1,3}\.){3}\d{1,3}$/;

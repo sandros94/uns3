@@ -2,14 +2,18 @@
   "name": "uns3",
   "version": "0.0.6",
   "description": "Runtime agnostic S3 client.",
-  "repository": "sandros94/uns3",
   "license": "MIT",
-  "sideEffects": false,
-  "type": "module",
   "author": {
     "name": "Sandro Circi",
     "email": "sandro.circi@digitoolmedia.com"
   },
+  "repository": "sandros94/uns3",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "types": "./dist/index.d.mts",
   "exports": {
     "./package.json": "./package.json",
     "./core": "./dist/core.mjs",
@@ -21,10 +25,6 @@
       "default": "./dist/index.mjs"
     }
   },
-  "types": "./dist/index.d.mts",
-  "files": [
-    "dist"
-  ],
   "scripts": {
     "build": "obuild",
     "dev:prepare": "obuild --stub",
@@ -37,9 +37,6 @@
     "typecheck": "tsgo --noEmit",
     "bench": "vitest bench --run"
   },
-  "resolutions": {
-    "uns3": "link:."
-  },
   "devDependencies": {
     "@types/node": "^24",
     "@typescript/native-preview": "7.0.0-dev.20260307.1",
@@ -51,6 +48,9 @@
     "oxlint": "^1.51.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
+  },
+  "resolutions": {
+    "uns3": "link:."
   },
   "engines": {
     "node": "^22.12 || >=24"

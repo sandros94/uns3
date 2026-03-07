@@ -92,11 +92,8 @@ export class S3Client {
     this.credentials = config.credentials;
     this.defaultBucket = config.defaultBucket;
     this.fetcher = config.fetch ?? globalFetch() ?? missingFetch();
-    this.contentTypeResolver =
-      config.contentTypeResolver ?? defaultContentTypeResolver;
-    this.checksumConfig = config.checksum
-      ? { ...config.checksum }
-      : { algorithm: "none" };
+    this.contentTypeResolver = config.contentTypeResolver ?? defaultContentTypeResolver;
+    this.checksumConfig = config.checksum ? { ...config.checksum } : { algorithm: "none" };
     const retry = config.retry
       ? { ...DEFAULT_RETRY_CONFIG, ...config.retry }
       : { ...DEFAULT_RETRY_CONFIG };
@@ -152,8 +149,7 @@ export class S3Client {
 
     if (isPlainObject(rawBody)) {
       body = JSON.stringify(rawBody);
-      contentType =
-        rawContentType === undefined ? "application/json" : rawContentType;
+      contentType = rawContentType === undefined ? "application/json" : rawContentType;
     } else {
       body = rawBody as BodyInit | ReadableStream<Uint8Array> | null;
       contentType = rawContentType;
@@ -203,10 +199,8 @@ export class S3Client {
     const baseQuery: Record<string, string> = { "list-type": "2" };
     if (params.prefix) baseQuery.prefix = params.prefix;
     if (params.delimiter) baseQuery.delimiter = params.delimiter;
-    if (params.continuationToken)
-      baseQuery["continuation-token"] = params.continuationToken;
-    if (typeof params.maxKeys === "number")
-      baseQuery["max-keys"] = String(params.maxKeys);
+    if (params.continuationToken) baseQuery["continuation-token"] = params.continuationToken;
+    if (typeof params.maxKeys === "number") baseQuery["max-keys"] = String(params.maxKeys);
 
     applyQuery(url, baseQuery);
     if (params.query) {
@@ -264,16 +258,10 @@ export class S3Client {
     return result.url.toString();
   }
 
-  async initiateMultipart(
-    params: MultipartInitParams,
-  ): Promise<MultipartInitResult> {
+  async initiateMultipart(params: MultipartInitParams): Promise<MultipartInitResult> {
     const bucket = this.resolveBucket(params.bucket);
     const key = this.resolveKey(params);
-    const contentType = resolveContentType(
-      key,
-      params.contentType,
-      this.contentTypeResolver,
-    );
+    const contentType = resolveContentType(key, params.contentType, this.contentTypeResolver);
     const url = buildRequestUrl({
       endpoint: this.endpoint,
       bucketStyle: this.bucketStyle,
@@ -305,9 +293,7 @@ export class S3Client {
     const text = await response.text();
     const uploadId = parseInitiateMultipartUpload(text);
     if (!uploadId) {
-      throw new Error(
-        "UploadId not present in InitiateMultipartUpload response.",
-      );
+      throw new Error("UploadId not present in InitiateMultipartUpload response.");
     }
 
     return { uploadId };
@@ -485,10 +471,7 @@ export class S3Client {
 
   private async perform(context: PerformContext): Promise<Response> {
     const credentials = await this.resolveCredentials();
-    const unsignedPayload = shouldUseUnsignedPayload(
-      context.method,
-      context.body,
-    );
+    const unsignedPayload = shouldUseUnsignedPayload(context.method, context.body);
     const maxAttempts = Math.max(1, this.retryConfig.maxAttempts);
     let attempt = 0;
     let lastError: unknown;
@@ -520,10 +503,7 @@ export class S3Client {
       });
 
       try {
-        const { response } = await send(
-          { request, signal: context.signal },
-          this.fetcher,
-        );
+        const { response } = await send({ request, signal: context.signal }, this.fetcher);
 
         this.updateClockSkew(response);
 
@@ -536,15 +516,7 @@ export class S3Client {
           response.body?.cancel?.();
         }
 
-        if (
-          !this.shouldRetry(
-            context.method,
-            response,
-            error,
-            attempt,
-            maxAttempts,
-          )
-        ) {
+        if (!this.shouldRetry(context.method, response, error, attempt, maxAttempts)) {
           throw error;
         }
 
@@ -554,15 +526,7 @@ export class S3Client {
           throw error;
         }
 
-        if (
-          !this.shouldRetry(
-            context.method,
-            undefined,
-            error,
-            attempt,
-            maxAttempts,
-          )
-        ) {
+        if (!this.shouldRetry(context.method, undefined, error, attempt, maxAttempts)) {
           throw ensureError(error);
         }
 
@@ -570,10 +534,7 @@ export class S3Client {
       }
 
       let delayMs = this.computeBackoffDelay(attempt);
-      if (
-        lastError instanceof S3Error &&
-        typeof lastError.retryAfter === "number"
-      ) {
+      if (lastError instanceof S3Error && typeof lastError.retryAfter === "number") {
         const retryDelay = Math.ceil(lastError.retryAfter * 1000);
         if (retryDelay > delayMs) {
           delayMs = retryDelay;
@@ -584,9 +545,7 @@ export class S3Client {
       }
     }
 
-    throw ensureError(
-      lastError ?? new Error("Request failed after exhausting retry attempts."),
-    );
+    throw ensureError(lastError ?? new Error("Request failed after exhausting retry attempts."));
   }
 
   private resolveBucket(bucket: string | undefined): string {
@@ -611,11 +570,7 @@ export class S3Client {
     }
 
     const credentials = typeof value === "function" ? await value() : value;
-    if (
-      !credentials ||
-      !credentials.accessKeyId ||
-      !credentials.secretAccessKey
-    ) {
+    if (!credentials || !credentials.accessKeyId || !credentials.secretAccessKey) {
       throw new Error("Invalid credentials resolved for S3Client.");
     }
     return credentials;
@@ -635,17 +590,12 @@ export class S3Client {
       return;
     }
 
-    const normalized = await normalizeBodyForChecksum(
-      body,
-      MAX_INLINE_CHECKSUM_BYTES,
-    );
+    const normalized = await normalizeBodyForChecksum(body, MAX_INLINE_CHECKSUM_BYTES);
 
     if (!("bytes" in normalized)) {
       if (this.checksumConfig.requireOnPut) {
         const reason = formatChecksumFailureReason(normalized.reason);
-        throw new Error(
-          `Unable to compute ${algorithm} checksum for PUT payload: ${reason}.`,
-        );
+        throw new Error(`Unable to compute ${algorithm} checksum for PUT payload: ${reason}.`);
       }
       return;
     }
@@ -772,8 +722,7 @@ type ChecksumNormalizationResult =
 type ChecksumAlgorithm = Exclude<ChecksumConfig["algorithm"], "none">;
 
 const textEncoder = new TextEncoder();
-const BASE64_ALPHABET =
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const CRC32C_INITIAL = 4_294_967_295;
 const CRC32C_POLY = 2_197_175_160;
 const CRC32C_TABLE = createCrc32cTable();
@@ -869,9 +818,7 @@ async function computeChecksumValue(
 }
 
 function resolveChecksumHeaderName(algorithm: ChecksumAlgorithm): string {
-  return algorithm === "sha256"
-    ? "x-amz-checksum-sha256"
-    : "x-amz-checksum-crc32c";
+  return algorithm === "sha256" ? "x-amz-checksum-sha256" : "x-amz-checksum-crc32c";
 }
 
 async function computeSha256Base64(data: Uint8Array): Promise<string> {
@@ -879,10 +826,7 @@ async function computeSha256Base64(data: Uint8Array): Promise<string> {
     data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
       ? data
       : new Uint8Array(data);
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    view as unknown as BufferSource,
-  );
+  const digest = await crypto.subtle.digest("SHA-256", view as unknown as BufferSource);
   return toBase64(new Uint8Array(digest));
 }
 
@@ -1042,8 +986,7 @@ function shouldUseUnsignedPayload(
   }
   if (typeof body === "string") return false;
   if (typeof Blob !== "undefined" && body instanceof Blob) return false;
-  if (typeof ArrayBuffer !== "undefined" && body instanceof ArrayBuffer)
-    return false;
+  if (typeof ArrayBuffer !== "undefined" && body instanceof ArrayBuffer) return false;
   if (ArrayBuffer.isView(body)) return false;
   return isPayloadStream(body as ReadableStream<Uint8Array>);
 }
@@ -1131,8 +1074,7 @@ async function readErrorBody(response: Response): Promise<string | undefined> {
         break;
       }
       const remaining = limit - total;
-      const chunk =
-        value.byteLength > remaining ? value.subarray(0, remaining) : value;
+      const chunk = value.byteLength > remaining ? value.subarray(0, remaining) : value;
       chunks.push(chunk);
       total += chunk.byteLength;
       if (total >= limit) {
@@ -1199,13 +1141,9 @@ function buildCompleteMultipartXml(parts: CompletedPart[]): string {
     .join("\n");
 }
 
-function normalizeCompletedParts(
-  parts: CompleteMultipartParams["parts"],
-): CompletedPart[] {
+function normalizeCompletedParts(parts: CompleteMultipartParams["parts"]): CompletedPart[] {
   if (!Array.isArray(parts) || parts.length === 0) {
-    throw new Error(
-      "At least one part is required to complete a multipart upload.",
-    );
+    throw new Error("At least one part is required to complete a multipart upload.");
   }
 
   const normalized = parts.map((part) => ({
@@ -1290,9 +1228,7 @@ function parseListObjectsV2(xml: string): ListObjectsV2Response {
     });
   }
 
-  for (const match of xml.matchAll(
-    /<CommonPrefixes>([\s\S]*?)<\/CommonPrefixes>/g,
-  )) {
+  for (const match of xml.matchAll(/<CommonPrefixes>([\s\S]*?)<\/CommonPrefixes>/g)) {
     const prefix = extractTag(match[1] ?? "", "Prefix");
     if (prefix) {
       commonPrefixes.push(prefix);
@@ -1300,8 +1236,7 @@ function parseListObjectsV2(xml: string): ListObjectsV2Response {
   }
 
   const isTruncated = extractTag(xml, "IsTruncated") === "true";
-  const nextContinuationToken =
-    extractTag(xml, "NextContinuationToken") ?? undefined;
+  const nextContinuationToken = extractTag(xml, "NextContinuationToken") ?? undefined;
 
   return {
     contents,
