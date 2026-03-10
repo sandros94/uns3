@@ -26,6 +26,7 @@
     }
   },
   "scripts": {
+    "postinstall": "pnpm simple-git-hooks",
     "build": "obuild",
     "dev:prepare": "obuild --stub",
     "lint": "oxlint . && oxfmt --check .",
@@ -54,19 +55,16 @@
   "resolutions": {
     "uns3": "link:."
   },
-  "engines": {
-    "node": "^22.12 || >=24"
-  },
   "simple-git-hooks": {
     "pre-commit": "./node_modules/.bin/nano-staged"
   },
   "nano-staged": {
-    "*.{js,ts,mjs,cjs}": [
-      "pnpm exec oxlint --fix"
-    ],
     "*.{js,ts,mjs,cjs,json,yml,md}": [
-      "pnpm exec oxfmt"
+      "pnpm run fmt"
     ]
+  },
+  "engines": {
+    "node": "^22.12 || >=24"
   },
   "packageManager": "pnpm@10.30.3"
 }
