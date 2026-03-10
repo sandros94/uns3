@@ -83,7 +83,7 @@ Depends on: all feature work above should be settled so the matrix is accurate.
 
 ```ts
 interface S3ClientConfig {
-  region: string;
+  region?: string; // defaults to "auto"
   endpoint: string;
   credentials?: Credentials | CredentialsProvider;
   defaultBucket?: string;

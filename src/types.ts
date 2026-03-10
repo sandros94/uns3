@@ -36,8 +36,8 @@ export interface ChecksumConfig {
 }
 
 export interface S3ClientConfig {
-  region: string;
   endpoint: string;
+  region?: string;
   credentials?: Credentials | CredentialsProvider;
   defaultBucket?: string;
   bucketStyle?: BucketStyle;

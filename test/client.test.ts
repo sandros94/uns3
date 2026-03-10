@@ -19,7 +19,6 @@ const integrationEnv = {
 } as const;
 
 const integrationSuite =
-  integrationEnv.region &&
   integrationEnv.bucket &&
   integrationEnv.endpoint &&
   integrationEnv.accessKeyId &&
@@ -721,7 +720,7 @@ integrationSuite("S3Client integration (real bucket)", () => {
     vi.useRealTimers();
     vi.setSystemTime(new Date());
     client = new S3Client({
-      region: integrationEnv.region!,
+      region: integrationEnv.region,
       endpoint: integrationEnv.endpoint!,
       credentials: {
         accessKeyId: integrationEnv.accessKeyId!,

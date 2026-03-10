@@ -86,7 +86,7 @@ export class S3Client {
    * @param config - Connection, credential, and runtime overrides for S3.
    */
   constructor(config: S3ClientConfig) {
-    this.region = config.region;
+    this.region = config.region ?? "auto";
     this.endpoint = config.endpoint;
     this.bucketStyle = config.bucketStyle ?? "virtual";
     this.credentials = config.credentials;
