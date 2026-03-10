@@ -4,6 +4,7 @@
  * @license MIT https://github.com/lukeed/mrmime/blob/c95e4bf5ac71e7847c7e74d409e237a37c7b5053/license
  */
 
+/** Mapping of file extensions to their corresponding MIME types, ported from mrmime. */
 export const mimes = {
   "3g2": "video/3gpp2",
   "3gp": "video/3gpp",

@@ -6,6 +6,7 @@ const encoder = new TextEncoder();
 const SERVICE = "s3";
 const UNSIGNED_PAYLOAD = "UNSIGNED-PAYLOAD";
 
+/** Input parameters for SigV4 request signing, including method, URL, credentials, and optional body/headers. */
 export interface SignRequestInput {
   method: Methods;
   url: URL;
@@ -17,6 +18,7 @@ export interface SignRequestInput {
   unsignedPayload?: boolean;
 }
 
+/** Result of a SigV4 signing operation, containing the signed headers and associated metadata. */
 export interface SignRequestResult {
   headers: Headers;
   payloadHash: string;
@@ -24,6 +26,7 @@ export interface SignRequestResult {
   signedHeaders: string;
 }
 
+/** Input parameters for generating a SigV4 presigned URL, including credentials, expiry, and optional headers. */
 export interface PresignInput {
   method: Methods;
   url: URL;
@@ -35,6 +38,7 @@ export interface PresignInput {
   unsignedPayload?: boolean;
 }
 
+/** Result of a presigned URL generation, containing the signed URL and associated metadata. */
 export interface PresignResult {
   url: URL;
   payloadHash: string;

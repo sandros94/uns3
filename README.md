@@ -45,16 +45,15 @@ import { S3Client, S3Error } from "https://esm.sh/uns3";
 
 ### Initialization
 
-First, create an instance of the `S3Client`. You need to provide your S3-compatible service's region, endpoint, and your credentials.
+First, create an instance of the `S3Client`. You need to provide your endpoint and credentials. The `region` defaults to `"auto"`, which is accepted by most S3-compatible providers; for AWS, specify the actual region (e.g. `"us-east-1"`).
 
 ```typescript
 import { S3Client } from "uns3";
 
 const client = new S3Client({
-  // e.g. "us-east-1" or "auto" for R2
-  region: "auto",
-  // e.g. "https://s3.amazonaws.com" or your custom endpoint
+  // e.g. "https://s3.us-east-1.amazonaws.com" or your custom endpoint
   endpoint: "https://<ACCOUNT_ID>.r2.cloudflarestorage.com",
+  // region: "us-east-1", // optional, defaults to "auto"
   credentials: {
     accessKeyId: "<ACCESS_KEY_ID>",
     secretAccessKey: "<SECRET_ACCESS_KEY>",

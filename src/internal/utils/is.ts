@@ -34,6 +34,9 @@ function looksLikeIpAddress(value: string): boolean {
   return IP_ADDRESS_REGEX.test(value);
 }
 
+/**
+ * Checks whether a bucket name is DNS-compatible per S3 naming rules (3-63 chars, lowercase alphanumeric, dots, hyphens).
+ */
 export function isDnsCompatibleBucketName(bucket: string): boolean {
   if (bucket.length < 3 || bucket.length > 63) {
     return false;
@@ -58,6 +61,9 @@ export function isDnsCompatibleBucketName(bucket: string): boolean {
   return true;
 }
 
+/**
+ * Type guard that returns true for plain objects and arrays, excluding BodyInit types and other built-in instances.
+ */
 export function isPlainObject(value: unknown): value is object {
   if (typeof value !== "object" || value === null) {
     return false;

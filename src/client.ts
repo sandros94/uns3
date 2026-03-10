@@ -114,6 +114,11 @@ export class S3Client {
    * `304 Not Modified` response with no body, which is treated as success.
    *
    * @param params - Request configuration including bucket and key.
+   * @example
+   * ```ts
+   * const response = await client.get({ bucket: "my-bucket", key: "hello.txt" });
+   * const text = await response.text();
+   * ```
    */
   async get(params: GetObjectParams): Promise<Response> {
     return await this.execute("GET", params, { expectedStatus: [200, 304] });
@@ -127,6 +132,11 @@ export class S3Client {
    * `304 Not Modified` response, which is treated as success.
    *
    * @param params - Request configuration including bucket and key.
+   * @example
+   * ```ts
+   * const response = await client.head({ bucket: "my-bucket", key: "hello.txt" });
+   * const exists = response.status === 200;
+   * ```
    */
   async head(params: HeadObjectParams): Promise<Response> {
     return await this.execute("HEAD", params, { expectedStatus: [200, 304] });
@@ -141,6 +151,10 @@ export class S3Client {
    * When conditions fail, S3 returns `412 Precondition Failed`.
    *
    * @param params - Upload configuration including payload and metadata.
+   * @example
+   * ```ts
+   * await client.put({ bucket: "my-bucket", key: "hello.txt", body: "Hello, world!" });
+   * ```
    */
   async put(params: PutObjectParams): Promise<Response> {
     const { body: rawBody, contentType: rawContentType } = params;
@@ -174,6 +188,10 @@ export class S3Client {
    * Deletes an object. Treats both 200 and 204 responses as success.
    *
    * @param params - Request configuration including bucket and key.
+   * @example
+   * ```ts
+   * await client.del({ bucket: "my-bucket", key: "hello.txt" });
+   * ```
    */
   async del(params: DeleteObjectParams): Promise<Response> {
     return await this.execute("DELETE", params, { expectedStatus: [200, 204] });
@@ -184,6 +202,13 @@ export class S3Client {
    * structure for contents and common prefixes.
    *
    * @param params - Listing options such as prefix, delimiter, and pagination.
+   * @example
+   * ```ts
+   * const result = await client.list({ bucket: "my-bucket", prefix: "uploads/" });
+   * for (const obj of result.contents) {
+   *   console.log(obj.key, obj.size);
+   * }
+   * ```
    */
   async list(params: ListObjectsV2Params = {}): Promise<ListObjectsV2Response> {
     const bucket = this.resolveBucket(params.bucket);
@@ -225,6 +250,15 @@ export class S3Client {
    * Generates a SigV4 presigned URL for the provided method and object key.
    *
    * @param params - Method, bucket/key, expiry, and optional overrides.
+   * @example
+   * ```ts
+   * const url = await client.getSignedUrl({
+   *   method: "GET",
+   *   bucket: "my-bucket",
+   *   key: "hello.txt",
+   *   expiresInSeconds: 3600,
+   * });
+   * ```
    */
   async getSignedUrl(params: PresignParams): Promise<string> {
     const bucket = this.resolveBucket(params.bucket);
@@ -258,6 +292,19 @@ export class S3Client {
     return result.url.toString();
   }
 
+  /**
+   * Starts a multipart upload and returns an upload ID for use with
+   * {@link uploadPart} and {@link completeMultipart}.
+   *
+   * @param params - Multipart initiation options including bucket, key, and optional metadata.
+   * @example
+   * ```ts
+   * const { uploadId } = await client.initiateMultipart({
+   *   bucket: "my-bucket",
+   *   key: "large-file.bin",
+   * });
+   * ```
+   */
   async initiateMultipart(params: MultipartInitParams): Promise<MultipartInitResult> {
     const bucket = this.resolveBucket(params.bucket);
     const key = this.resolveKey(params);
@@ -299,6 +346,22 @@ export class S3Client {
     return { uploadId };
   }
 
+  /**
+   * Uploads a single part of a multipart upload. Returns the ETag required
+   * by {@link completeMultipart} to assemble the final object.
+   *
+   * @param params - Part upload options including uploadId, partNumber, and body.
+   * @example
+   * ```ts
+   * const { etag } = await client.uploadPart({
+   *   bucket: "my-bucket",
+   *   key: "large-file.bin",
+   *   uploadId: "abc123",
+   *   partNumber: 1,
+   *   body: chunk,
+   * });
+   * ```
+   */
   async uploadPart(params: UploadPartParams): Promise<UploadPartResult> {
     const bucket = this.resolveBucket(params.bucket);
     const key = this.resolveKey(params);
@@ -355,6 +418,18 @@ export class S3Client {
    * When conditions fail, S3 returns `412 Precondition Failed`.
    *
    * @param params - Configuration for completing the multipart upload.
+   * @example
+   * ```ts
+   * await client.completeMultipart({
+   *   bucket: "my-bucket",
+   *   key: "large-file.bin",
+   *   uploadId: "abc123",
+   *   parts: [
+   *     { partNumber: 1, etag: "etag1" },
+   *     { partNumber: 2, etag: "etag2" },
+   *   ],
+   * });
+   * ```
    */
   async completeMultipart(params: CompleteMultipartParams): Promise<Response> {
     const bucket = this.resolveBucket(params.bucket);
@@ -392,6 +467,20 @@ export class S3Client {
     });
   }
 
+  /**
+   * Cancels an in-progress multipart upload, freeing any already-uploaded parts
+   * on the server.
+   *
+   * @param params - Abort options including bucket, key, and uploadId.
+   * @example
+   * ```ts
+   * await client.abortMultipart({
+   *   bucket: "my-bucket",
+   *   key: "large-file.bin",
+   *   uploadId: "abc123",
+   * });
+   * ```
+   */
   async abortMultipart(params: AbortMultipartParams): Promise<void> {
     const bucket = this.resolveBucket(params.bucket);
     const key = this.resolveKey(params);
