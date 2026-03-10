@@ -131,7 +131,7 @@ export interface ListObjectsV2Response {
   contents: Array<{
     key: string;
     size: number;
-    etag: string;
+    etag: string | undefined;
     lastModified: string;
     storageClass?: string;
   }>;

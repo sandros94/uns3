@@ -1216,13 +1216,13 @@ function parseListObjectsV2(xml: string): ListObjectsV2Response {
     const etag = extractTag(section, "ETag");
     const lastModified = extractTag(section, "LastModified");
     const storageClass = extractTag(section, "StorageClass") ?? undefined;
-    if (!key || !size || !etag || !lastModified) {
+    if (!key || !size || !lastModified) {
       continue;
     }
     contents.push({
       key,
       size: Number.parseInt(size, 10),
-      etag: stripQuotes(etag),
+      etag: etag ? stripQuotes(etag) : undefined,
       lastModified,
       storageClass,
     });

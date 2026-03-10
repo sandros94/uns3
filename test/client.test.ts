@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { type Credentials, S3Client, S3Error } from "../src/index.ts";
+import { type Credentials, type BucketStyle, S3Client, S3Error } from "../src/index.ts";
 
 const credentials: Credentials = {
   accessKeyId: "AKIDEXAMPLE",
@@ -16,6 +16,7 @@ const integrationEnv = {
   accessKeyId: process.env.VITE_S3_ACCESS_KEY_ID,
   secretAccessKey: process.env.VITE_S3_SECRET_ACCESS_KEY,
   sessionToken: process.env.VITE_S3_SESSION_TOKEN,
+  bucketStyle: process.env.VITE_S3_BUCKET_STYLE as BucketStyle | undefined,
 } as const;
 
 const integrationSuite =
@@ -722,6 +723,7 @@ integrationSuite("S3Client integration (real bucket)", () => {
     client = new S3Client({
       region: integrationEnv.region,
       endpoint: integrationEnv.endpoint!,
+      bucketStyle: integrationEnv.bucketStyle,
       credentials: {
         accessKeyId: integrationEnv.accessKeyId!,
         secretAccessKey: integrationEnv.secretAccessKey!,
@@ -800,7 +802,7 @@ integrationSuite("S3Client integration (real bucket)", () => {
   it("performs a multipart upload lifecycle", async () => {
     const key = `${prefix}/multipart-${Date.now()}.txt`;
     const encoder = new TextEncoder();
-    const partSize = 5 * 1024 * 1024;
+    const partSize = 5 * 1024 * 1024; // 5 MiB
     const partOne = new Uint8Array(partSize);
     partOne.fill("a".codePointAt(0)!);
     const partTwo = encoder.encode("tail");
