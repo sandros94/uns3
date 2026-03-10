@@ -1,5 +1,62 @@
 # Changelog
 
+## v0.0.7
+
+[compare changes](https://github.com/sandros94/uns3/compare/v0.0.6...v0.0.7)
+
+### 🚀 Enhancements
+
+- **client:** Add filtering of disallowed headers from error responses ([152bf6e](https://github.com/sandros94/uns3/commit/152bf6e))
+
+### 🔥 Performance
+
+- **core:** Improve `toHex` signer ([658601b](https://github.com/sandros94/uns3/commit/658601b))
+
+### 🩹 Fixes
+
+- Make `region` optional ([2a1eee7](https://github.com/sandros94/uns3/commit/2a1eee7))
+- Do not require `ETag` in `ListObjectsV2` ([9f2e201](https://github.com/sandros94/uns3/commit/9f2e201))
+
+### 📖 Documentation
+
+- Rewrite original plan and better list what's missing ([9e189cd](https://github.com/sandros94/uns3/commit/9e189cd))
+- Add JSDoc to all public exports with examples ([56ada3c](https://github.com/sandros94/uns3/commit/56ada3c))
+
+### 📦 Build
+
+- Add rolldown platform configuration ([3f669d3](https://github.com/sandros94/uns3/commit/3f669d3))
+
+### 🌊 Types
+
+- Fix override cause ([1e1379c](https://github.com/sandros94/uns3/commit/1e1379c))
+
+### 🏡 Chore
+
+- Switch to obuild ([2d62c0c](https://github.com/sandros94/uns3/commit/2d62c0c))
+- Use eslint cache and specify prettier targets ([e69a5cf](https://github.com/sandros94/uns3/commit/e69a5cf))
+- Restructure project files and simplify build output ([128c8be](https://github.com/sandros94/uns3/commit/128c8be))
+- Add `AGENTS.md` ([2f77378](https://github.com/sandros94/uns3/commit/2f77378))
+- Update readme badges ([aac9711](https://github.com/sandros94/uns3/commit/aac9711))
+- Switch to oxc and tsgo, update deps ([0356b76](https://github.com/sandros94/uns3/commit/0356b76))
+- Apply automated updates ([d81562c](https://github.com/sandros94/uns3/commit/d81562c))
+- Improve internal docs ([bb1efcb](https://github.com/sandros94/uns3/commit/bb1efcb))
+- Setup nano-staged ([342cc19](https://github.com/sandros94/uns3/commit/342cc19))
+- Fix format ([d1a9df6](https://github.com/sandros94/uns3/commit/d1a9df6))
+- Update pnpm ([8b590c0](https://github.com/sandros94/uns3/commit/8b590c0))
+
+### ✅ Tests
+
+- Fix imports ([f702f26](https://github.com/sandros94/uns3/commit/f702f26))
+
+### 🤖 CI
+
+- Revert by separating autofix ci ([ce4375f](https://github.com/sandros94/uns3/commit/ce4375f))
+- Refactor workflows ([ff69c7a](https://github.com/sandros94/uns3/commit/ff69c7a))
+
+### ❤️ Contributors
+
+- Sandro Circi ([@sandros94](https://github.com/sandros94))
+
 ## v0.0.6
 
 [compare changes](https://github.com/sandros94/uns3/compare/v0.0.5...v0.0.6)
