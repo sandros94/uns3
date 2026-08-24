@@ -56,7 +56,18 @@ export interface RetryConfig {
   baseDelayMs: number;
   /** When `true`, adds random jitter to the retry delay to reduce thundering-herd effects. */
   jitter?: boolean;
-  /** Custom predicate to decide whether a failed request should be retried. Receives the response (if any) and the thrown error. */
+  /**
+   * Custom predicate to decide whether a failed request should be retried.
+   * Receives the response (if any) and the thrown error.
+   *
+   * It is the decision, not a filter on it: the default rule — retry only
+   * `GET` and `HEAD`, because the rest are not idempotent — is replaced by
+   * whatever this returns, so a predicate can also ask for a `PUT` to be
+   * repeated. The body is re-sent as given, which is fine for a string, a
+   * buffer or a `Blob`; a `ReadableStream` body is consumed by the first
+   * attempt and is never retried whatever this returns, since there is nothing
+   * left to send. A predicate that throws is read as `false`.
+   */
   retriable?: (res: Response | undefined, err: unknown) => boolean;
 }
 
@@ -159,7 +170,15 @@ export interface PutObjectParams
   extends BaseRequest, Pick<ConditionalHeaders, "ifMatch" | "ifNoneMatch"> {
   /** Object key to write. */
   key: string;
-  /** Request body; plain objects are JSON-serialized automatically. */
+  /**
+   * Request body; plain objects are JSON-serialized automatically.
+   *
+   * A `ReadableStream` is sent as it arrives and is never retried: it is
+   * consumed by the attempt that sent it, so there is no second attempt to
+   * make. It is also signed as `UNSIGNED-PAYLOAD` and cannot be checksummed —
+   * hashing it would mean buffering it, which is the thing a stream is for
+   * avoiding.
+   */
   body: BodyInit | ReadableStream<Uint8Array> | null | object;
   /** Explicit MIME type. Set to `false` to suppress automatic detection. */
   contentType?: string | false;
@@ -207,7 +226,17 @@ export interface UploadPartParams extends BaseRequest {
   partNumber: number;
   /** Body content for this part. */
   body: BodyInit | ReadableStream<Uint8Array> | null;
-  /** Hint for providers that require an explicit Content-Length header. Not validated against the actual body size — the caller is responsible for accuracy. */
+  /**
+   * Hint for providers that require an explicit `Content-Length` header. Not
+   * validated against the actual body size — the caller is responsible for
+   * accuracy.
+   *
+   * The header is signed with the rest of the request, so a wrong value is not
+   * a wrong number: too small and the store rejects the signature or the body,
+   * too large and the connection waits for bytes that never come and surfaces
+   * as a bare `fetch failed`. Neither is retried, because a `PUT` is not
+   * idempotent. Pass the body's byte length or leave it out.
+   */
   contentLength?: number;
 }
 
@@ -269,6 +298,16 @@ export interface ListObjectsV2Response {
   isTruncated: boolean;
   /** Pass this value as `continuationToken` to fetch the next page of results. */
   nextContinuationToken?: string;
+  /**
+   * The `NextMarker` of a store that answered V1-style pagination, present only
+   * when it sent one — several S3-compatible stores ignore `list-type=2` and
+   * page this way, in which case `isTruncated` is `true` and
+   * `nextContinuationToken` is absent.
+   *
+   * It is not a continuation token and does not work as one: pass it back as
+   * `query: { marker }` rather than as `continuationToken`.
+   */
+  nextMarker?: string;
 }
 
 /** HTTP methods that can be used for presigned URLs. */

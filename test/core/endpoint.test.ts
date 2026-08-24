@@ -72,4 +72,50 @@ describe("endpoint builder", () => {
     expect(url.hostname).toBe("my-bucket.s3.amazonaws.com");
     expect(url.pathname).toBe("/leading/slash.txt");
   });
+
+  /*
+   * A key is bytes, and `dir/../evil.txt` is a perfectly legal one: S3's key
+   * space is flat, so those three characters are part of the name rather than a
+   * step up a tree. A URL's path is not flat, and every WHATWG parser — which is
+   * every `URL`, every `Request`, and therefore every `fetch` — removes dot
+   * segments while parsing. The key used to be handed to `base.pathname` and
+   * came back out shorter: `dir/../evil.txt` was silently stored as `evil.txt`,
+   * and `users/a/../b/x` silently escaped the `users/a/` prefix it was scoped to.
+   *
+   * Percent-encoding does not save it. The spec counts `%2e` and `%2E` as dots
+   * for exactly this purpose, so `%2E%2E` is removed as eagerly as `..` is —
+   * verified against Node's parser, not assumed. There is no spelling of a
+   * dot segment that survives a URL, which means a fetch-based client cannot put
+   * one on the wire at all. So it says so, loudly, instead of writing somewhere
+   * the caller did not ask for.
+   */
+  it("refuses keys whose dot segments a URL would normalize away", () => {
+    expect(() => encodeS3Key("dir/../evil.txt")).toThrow(/dot segment/i);
+    expect(() => encodeS3Key("users/a/../b/x")).toThrow(/dot segment/i);
+    expect(() => encodeS3Key("a/./b")).toThrow(/dot segment/i);
+    expect(() => encodeS3Key("..")).toThrow(/dot segment/i);
+    expect(() => encodeS3Key(".")).toThrow(/dot segment/i);
+    /* The leading slash is stripped first, so this is `../a` by the time it is judged. */
+    expect(() => encodeS3Key("/../a")).toThrow(/dot segment/i);
+    expect(() => encodeS3Key("a/..")).toThrow(/dot segment/i);
+
+    expect(() =>
+      buildRequestUrl({
+        endpoint: "https://s3.amazonaws.com",
+        bucketStyle: "path",
+        bucket: "my-bucket",
+        key: "dir/../evil.txt",
+      }),
+    ).toThrow(/dot segment/i);
+  });
+
+  it("leaves dots that are part of a name alone", () => {
+    /* Only a WHOLE segment of one or two dots is a dot segment. Everything else
+       is a name that happens to contain dots, and names are none of our business. */
+    expect(encodeS3Key("a.b/c..d")).toBe("a.b/c..d");
+    expect(encodeS3Key("...")).toBe("...");
+    expect(encodeS3Key("a/..b/c")).toBe("a/..b/c");
+    expect(encodeS3Key(".hidden/..config")).toBe(".hidden/..config");
+    expect(encodeS3Key("archive.tar.gz")).toBe("archive.tar.gz");
+  });
 });

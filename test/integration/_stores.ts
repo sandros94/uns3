@@ -15,7 +15,7 @@ import { GenericContainer, Wait, getContainerRuntimeClient } from "testcontainer
 import type { StartedTestContainer, WaitStrategy } from "testcontainers";
 import { signRequest } from "../../src/core.ts";
 import { S3Client } from "../../src/index.ts";
-import type { Credentials, PutObjectParams } from "../../src/index.ts";
+import type { Credentials, PutObjectParams, S3ClientConfig } from "../../src/index.ts";
 
 /** Signing region. Neither store cares which it is; both care that it is stable. */
 export const REGION: string = "us-east-1";
@@ -55,6 +55,27 @@ export interface StoreSpec {
   /** What the client signs with, and what the store was told to accept. */
   credentials: Credentials;
   /**
+   * Whether the store accepts a body of unknown length.
+   *
+   * A `ReadableStream` with no `Content-Length` goes out as
+   * `Transfer-Encoding: chunked`. SeaweedFS reads it; RustFS answers `411
+   * MissingContentLength` and is in good company doing so — AWS S3 requires a
+   * length on PUT too. Declaring one (`headers: { "content-length": … }` on a
+   * put, or `contentLength` on a part) satisfies every store, which is what the
+   * length-declaring tests assert; this flag only decides which side of the
+   * disagreement the unknown-length tests assert.
+   */
+  chunkedUploads: boolean;
+  /**
+   * Whether a key may contain control characters.
+   *
+   * A newline is a legal S3 key byte and SeaweedFS stores one happily. RustFS
+   * rejects it with `400 InvalidArgument` before looking at anything else, so
+   * the round-trip is asserted on one store and the refusal on the other rather
+   * than dropping the case that proves the client transmits it faithfully.
+   */
+  controlCharsInKeys: boolean;
+  /**
    * Whether the bucket-create PUT has to carry a signature.
    *
    * This is not a preference, it is what the store will answer. SeaweedFS's S3
@@ -80,6 +101,8 @@ export const STORES: Record<StoreName, StoreSpec> = {
      */
     wait: () => Wait.forLogMessage(/Start Seaweed S3 API Server/),
     credentials: { accessKeyId: "uns3", secretAccessKey: "uns3-secret" },
+    chunkedUploads: true,
+    controlCharsInKeys: true,
     signBucketCreate: false,
   },
   rustfs: {
@@ -101,6 +124,8 @@ export const STORES: Record<StoreName, StoreSpec> = {
      */
     wait: () => Wait.forHttp("/health", 9000),
     credentials: { accessKeyId: "rustfsadmin", secretAccessKey: "rustfsadmin" },
+    chunkedUploads: false,
+    controlCharsInKeys: false,
     signBucketCreate: true,
   },
 };
@@ -231,14 +256,22 @@ export async function createBucket(spec: StoreSpec, endpoint: string): Promise<v
  * Path style is not a preference either: both stores answer on an address with
  * no wildcard DNS in front of it, so a virtual-hosted request would be sent to a
  * hostname that does not resolve.
+ *
+ * `overrides` is for the handful of tests that need a differently configured
+ * client — checksums, say — against the same running store.
  */
-export function clientFor(spec: StoreSpec, store: StartedStore): S3Client {
+export function clientFor(
+  spec: StoreSpec,
+  store: StartedStore,
+  overrides: Partial<S3ClientConfig> = {},
+): S3Client {
   return new S3Client({
     endpoint: store.endpoint,
     region: REGION,
     credentials: spec.credentials,
     bucketStyle: "path",
     defaultBucket: BUCKET,
+    ...overrides,
   });
 }
 

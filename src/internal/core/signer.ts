@@ -1,6 +1,7 @@
 import type { Credentials, Methods } from "../../types.ts";
-import { uriEncode } from "../utils/encode.ts";
+import { encodeQueryString, uriEncode } from "../utils/encode.ts";
 import { isArrayBuffer, isArrayBufferView, isBlob, isReadableStream } from "../utils/is.ts";
+import { finalizeQuery } from "./serializer.ts";
 
 const encoder = new TextEncoder();
 const SERVICE = "s3";
@@ -155,6 +156,13 @@ export async function presignUrl(input: PresignInput): Promise<PresignResult> {
     stringToSign,
   );
   presignedUrl.searchParams.set("X-Amz-Signature", signature);
+  /*
+   * The signature covers the canonical (RFC 3986) query, so the URL handed back
+   * has to carry that encoding rather than `URLSearchParams`' form encoding —
+   * otherwise a presigned URL with a space anywhere in it, `my file.txt`
+   * included, is a URL whose own signature does not cover what it says.
+   */
+  finalizeQuery(presignedUrl);
 
   return {
     url: presignedUrl,
@@ -300,17 +308,20 @@ function getCanonicalUri(pathname: string): string {
   return encodedPath.startsWith("/") ? encodedPath : `/${encodedPath}`;
 }
 
+/**
+ * Builds the canonical query for signing: the same RFC 3986 encoding the wire
+ * gets from {@link finalizeQuery}, sorted as the specification requires.
+ */
 function getCanonicalQuery(params: URLSearchParams): string {
-  const entries: Array<{ key: string; value: string }> = [];
-  for (const [key, value] of params) {
-    entries.push({ key, value });
-  }
-  entries.sort((a, b) =>
-    a.key === b.key ? (a.value < b.value ? -1 : a.value > b.value ? 1 : 0) : a.key < b.key ? -1 : 1,
+  const entries: Array<[string, string]> = [...params];
+  entries.sort(([aKey, aValue], [bKey, bValue]) =>
+    aKey === bKey ? compareStrings(aValue, bValue) : compareStrings(aKey, bKey),
   );
-  return entries
-    .map((entry) => `${uriEncode(entry.key, true)}=${uriEncode(entry.value, true)}`)
-    .join("&");
+  return encodeQueryString(entries);
+}
+
+function compareStrings(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 async function calculateSignature(

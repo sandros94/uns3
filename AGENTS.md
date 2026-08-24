@@ -76,7 +76,19 @@ Uses `obuild` with rolldown in `neutral` platform mode. Three bundle entry point
   `.oxclintrc.json` / `.oxcfmtrc.json` pair was silently never read.
 - Source files use `.ts` extensions in imports (e.g., `import { S3Error } from "./error.ts"`).
 - No runtime dependencies — all crypto uses `crypto.subtle`, all HTTP uses `fetch`.
-- XML responses are parsed with simple regex extraction (`extractTag`), not a DOM parser.
+- XML responses are parsed with simple regex extraction (`extractTag`), not a DOM
+  parser. The patterns tolerate attributes on elements and unwrap `CDATA`, and
+  entities are decoded in a SINGLE pass (`decodeXml`) — sequential replaces let
+  `&amp;` cascade into the pass after it, which decodes escaped text twice.
+- The query string that goes on the wire is written by `finalizeQuery`, with the
+  same RFC 3986 encoder the signer canonicalizes with. `URLSearchParams`
+  serialization (`+` for a space, `%7E` for a tilde) must never reach a request
+  or a presigned URL: the signature covers the canonical bytes, and a store that
+  recomputes them — AWS does — rejects anything else.
+- Object keys reach the wire literally, which is why `encodeS3Key` throws on a
+  `.` or `..` path segment. Every URL parser deletes those, so the alternative is
+  silently writing to a different key. `%2e` is a dot to the parser too; there is
+  no encoding that survives.
 - Every public method takes `expectedStatus` and must honor it as
   `params.expectedStatus ?? <its own default>`. The caller's list _replaces_ the
   default; never merge, and never hard-code past it. `get`/`head` include `206`

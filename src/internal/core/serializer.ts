@@ -1,4 +1,5 @@
 import type { BaseRequest, ByteRange, PutObjectParams } from "../../types.ts";
+import { encodeQueryString } from "../utils/encode.ts";
 import { isReadableStream } from "../utils/is.ts";
 
 export interface HeaderBuildOptions {
@@ -79,6 +80,25 @@ export function applyQuery(url: URL, query: BaseRequest["query"]): void {
       url.searchParams.append(key, normalizeQueryValue(value));
     }
   }
+}
+
+/**
+ * Rewrites a URL's query string so the bytes that go on the wire are the bytes
+ * SigV4 signs, and returns the same (mutated) instance.
+ *
+ * Parameters keep the order they were added in — only the encoding changes, and
+ * the decoded pairs are untouched, so the canonical query the signer derives
+ * from `url.searchParams` describes exactly what is sent. The signer sorts its
+ * own copy, as the specification requires; the wire does not have to.
+ *
+ * Call this last, after every parameter is in place: anything appended
+ * afterwards goes back through `URLSearchParams` serialization.
+ *
+ * @param url - URL instance to mutate.
+ */
+export function finalizeQuery(url: URL): URL {
+  url.search = encodeQueryString(url.searchParams);
+  return url;
 }
 
 /**

@@ -155,6 +155,24 @@ await client.put({
 });
 ```
 
+**Streaming uploads**
+
+A `ReadableStream` body is sent as it is produced. Two consequences are worth knowing: it is signed as `UNSIGNED-PAYLOAD` and cannot be checksummed (hashing it would mean buffering it, which is the thing a stream avoids), and it is never retried — the stream is consumed by the attempt that sent it, so there is nothing left to send a second time.
+
+Most stores also want a length. With none, the body goes out as `Transfer-Encoding: chunked`, which AWS S3 and several S3-compatible stores answer with `411 MissingContentLength`. Declare it whenever you know it:
+
+```typescript
+await client.put({
+  key: "large.bin",
+  body: stream,
+  headers: { "content-length": String(byteLength) },
+});
+```
+
+**Object keys**
+
+Keys are sent as written, with one exception the runtime forces: a key containing a `.` or `..` **path segment** (`dir/../evil.txt`, `a/./b`) is rejected. Every URL parser — and therefore every `fetch` — deletes dot segments while parsing, so such a key cannot be put on the wire at all; it used to be silently rewritten into a different key, which is worse than an error. Dots inside a name (`archive.tar.gz`, `c..d`) are ordinary characters and are untouched.
+
 **Conditional Overwrites (Advanced)**
 
 The `put()` method supports optional conditional headers (`ifMatch`, `ifNoneMatch`) for preventing accidental overwrites. Note that not all S3-compatible providers support these headers.
@@ -199,6 +217,16 @@ console.log("Files:", result.contents);
 
 console.log("Subdirectories:", result.commonPrefixes);
 // [ 'documents/images/', ... ]
+```
+
+Pagination follows `nextContinuationToken` for as long as `isTruncated` is `true`. A store that ignores `list-type=2` and answers V1-style pagination instead reports `nextMarker`, which is not a continuation token and does not work as one — pass it back as `query: { marker }`:
+
+```typescript
+let token: string | undefined;
+do {
+  const page = await client.list({ prefix: "documents/", continuationToken: token });
+  token = page.isTruncated ? page.nextContinuationToken : undefined;
+} while (token);
 ```
 
 #### `getSignedUrl()`

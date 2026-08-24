@@ -112,6 +112,104 @@ describe.skipIf(!HAS_CONTAINER_RUNTIME).each(SELECTED)("$name", (spec: StoreSpec
   });
 
   /*
+   * A `ReadableStream` body used to be unsendable: `new Request(url, { body })`
+   * throws `duplex option is required` on undici, Deno, Bun and workerd unless
+   * `duplex: "half"` is passed with it, so the request never reached the socket
+   * at all. These two put real bytes through a real store in several chunks and
+   * compare what comes back, which is the only way to find out that the halves
+   * arrived in one piece and in order.
+   */
+  describe("streaming bodies", () => {
+    it("uploads a streamed body and reads it back byte for byte", async () => {
+      const key = `${randomPrefix()}streamed.bin`;
+      const body = countingBytes(3 * 1024);
+
+      const written = await client.put({
+        key,
+        body: streamOf(body, 1024),
+        contentType: "application/octet-stream",
+        /*
+         * Declared rather than chunked, because that is what works everywhere:
+         * a stream with no length goes out as `Transfer-Encoding: chunked`, and
+         * RustFS — like AWS — will not take a PUT without a `Content-Length`.
+         * The two tests below assert that difference; this one is about the
+         * bytes, and asserts them on both stores.
+         */
+        headers: { "content-length": String(body.byteLength) },
+      });
+      expect(written.status).toBe(200);
+      await discard(written);
+
+      const read = await client.get({ key });
+      expect(read.status).toBe(200);
+      await expect(bytesOf(read)).resolves.toEqual(body);
+    });
+
+    it.skipIf(!spec.chunkedUploads)("uploads a streamed body of unknown length", async () => {
+      const key = `${randomPrefix()}chunked.bin`;
+      const body = countingBytes(3 * 1024);
+
+      await discard(
+        await client.put({
+          key,
+          body: streamOf(body, 1024),
+          contentType: "application/octet-stream",
+        }),
+      );
+
+      const read = await client.get({ key });
+      await expect(bytesOf(read)).resolves.toEqual(body);
+    });
+
+    it.skipIf(spec.chunkedUploads)("answers 411 to a body of unknown length", async () => {
+      const key = `${randomPrefix()}chunked.bin`;
+
+      const refused = await rejection(() =>
+        client.put({
+          key,
+          body: streamOf(countingBytes(3 * 1024), 1024),
+          contentType: "application/octet-stream",
+        }),
+      );
+      /* The store's rule, not the client's: it wants a length and says so. */
+      expect(refused.status).toBe(411);
+      expect(refused.code).toBe("MissingContentLength");
+    });
+
+    it("uploads a streamed multipart part", async () => {
+      const key = `${randomPrefix()}streamed-part.bin`;
+      const first = countingBytes(MIN_PART_BYTES);
+      const second = countingBytes(TAIL_PART_BYTES, MIN_PART_BYTES);
+
+      const { uploadId } = await client.initiateMultipart({ key });
+      const partOne = await client.uploadPart({
+        key,
+        uploadId,
+        partNumber: 1,
+        body: streamOf(first, 64 * 1024),
+        contentLength: first.byteLength,
+      });
+      const partTwo = await client.uploadPart({ key, uploadId, partNumber: 2, body: second });
+      await discard(
+        await client.completeMultipart({
+          key,
+          uploadId,
+          parts: [
+            { partNumber: 1, etag: partOne.etag },
+            { partNumber: 2, etag: partTwo.etag },
+          ],
+        }),
+      );
+
+      const read = await client.get({ key });
+      expect(read.headers.get("content-length")).toBe(String(first.length + second.length));
+      await expect(bytesOf(read).then(sha256Hex)).resolves.toBe(
+        await sha256Hex(joined(first, second)),
+      );
+    });
+  });
+
+  /*
    * THE REGRESSION TEST THIS SUITE EXISTS FOR.
    *
    * A ranged GET is answered 206, not 200, and a client that only accepts 200
@@ -365,17 +463,102 @@ describe.skipIf(!HAS_CONTAINER_RUNTIME).each(SELECTED)("$name", (spec: StoreSpec
       expect(Date.parse(entry?.lastModified ?? "")).not.toBeNaN();
 
       /*
-       * `toContain` rather than an equality, and the looseness is the client's
-       * rather than the stores'. SeaweedFS XML-escapes the quotes around
-       * `<ETag>` as the NUMERIC entity `&#34;`, and `decodeXml` in
-       * `src/client.ts` maps `&quot;` but not `&#34;` — so the entity survives
-       * parsing, `stripQuotes` never sees a leading `"`, and the parsed etag
-       * reads `&#34;5eb6…&#34;`. RustFS sends the hex bare and comes back clean.
-       * Asserting equality here would be asserting that gap is correct; this
-       * asserts what both stores actually reported the object's etag to be.
+       * An equality, and it took a fix to earn. SeaweedFS XML-escapes the quotes
+       * around `<ETag>` as the NUMERIC entity `&#34;`, which `decodeXml` did not
+       * know: the entity survived parsing, `stripQuotes` never saw a leading
+       * quote, and a listed etag read `&#34;5eb6…&#34;` where the HEAD said
+       * `5eb6…`. RustFS sends the hex bare and always came back clean, which is
+       * exactly why one store is not enough. The listed etag is now the object's
+       * etag, on both.
        */
       const etag = (await etagOf(client, `${prefix}sized.txt`)).replaceAll('"', "");
-      expect(entry?.etag).toContain(etag);
+      expect(entry?.etag).toBe(etag);
+    });
+
+    /*
+     * Keys that make the store escape its own XML, listed through a paginated
+     * walk so the continuation token is exercised on the same documents. The
+     * last of them is the one that matters most: a key whose text IS the four
+     * characters `&lt;` gets escaped by the store as `&amp;lt;`, and a decoder
+     * that resolved `&amp;` first and then went on reading its own output handed
+     * back `<`. The key as reported could not be asked for.
+     */
+    it("round-trips keys that have to be escaped, across pages", async () => {
+      const prefix = randomPrefix();
+      const names = [`a&b.txt`, `c<d>.txt`, `e"f.txt`, `g'h.txt`, `i&lt;j.txt`];
+      for (const name of names) await seed(client, `${prefix}${name}`, name, "text/plain");
+
+      const seen: string[] = [];
+      let token: string | undefined;
+      let pages = 0;
+      do {
+        const page = await client.list({ prefix, maxKeys: 2, continuationToken: token });
+        seen.push(...page.contents.map((entry) => entry.key));
+        token = page.isTruncated ? page.nextContinuationToken : undefined;
+        pages += 1;
+      } while (token && pages < 10);
+
+      expect(pages).toBeGreaterThan(1);
+      expect(seen).toEqual([...names].sort().map((name) => `${prefix}${name}`));
+
+      /* And every key it reported is a key it can fetch back. */
+      for (const key of seen) {
+        const read = await client.get({ key });
+        expect(read.status).toBe(200);
+        await expect(read.text()).resolves.toBe(key.slice(prefix.length));
+      }
+    });
+
+    /*
+     * A newline is a legal byte in an S3 key and an awkward one everywhere else:
+     * it travels as `%0A`, comes back inside the XML as a raw line break, and a
+     * parser that reads a line at a time loses it. SeaweedFS stores it; RustFS
+     * refuses keys with control characters outright, so that refusal is what is
+     * asserted there rather than nothing at all.
+     */
+    it.skipIf(!spec.controlCharsInKeys)("round-trips a key containing a newline", async () => {
+      const prefix = randomPrefix();
+      const key = `${prefix}two\nlines.txt`;
+
+      await seed(client, key, "hello world", "text/plain");
+
+      const listed = await client.list({ prefix });
+      expect(listed.contents.map((entry) => entry.key)).toEqual([key]);
+
+      const read = await client.get({ key });
+      await expect(read.text()).resolves.toBe("hello world");
+    });
+
+    it.skipIf(spec.controlCharsInKeys)("is told off for a key containing a newline", async () => {
+      const key = `${randomPrefix()}two\nlines.txt`;
+
+      const refused = await rejection(() => client.put({ key, body: "hello world" }));
+      expect(refused.status).toBe(400);
+      expect(refused.code).toBe("InvalidArgument");
+    });
+
+    /*
+     * A space in a prefix is where the signed query and the sent query used to
+     * part company: SigV4 canonicalises it as `%20`, `URLSearchParams` sent `+`.
+     * Both stores here are lenient enough to answer either — AWS is not, which
+     * is why the byte-level assertion lives in `test/client-wire.test.ts` — so
+     * what this proves is the other half: the new encoding is one real stores
+     * understand, and the keys come back.
+     */
+    it("lists a prefix with a space in it", async () => {
+      const prefix = `${randomPrefix()}my folder/`;
+      await seed(client, `${prefix}a.txt`, "a", "text/plain");
+      await seed(client, `${prefix}nested/b.txt`, "b", "text/plain");
+
+      const listed = await client.list({ prefix });
+      expect(listed.contents.map((entry) => entry.key)).toEqual([
+        `${prefix}a.txt`,
+        `${prefix}nested/b.txt`,
+      ]);
+
+      const rolled = await client.list({ prefix, delimiter: "/" });
+      expect(rolled.contents.map((entry) => entry.key)).toEqual([`${prefix}a.txt`]);
+      expect(rolled.commonPrefixes).toEqual([`${prefix}nested/`]);
     });
 
     it("rolls keys below a delimiter into commonPrefixes", async () => {
@@ -508,6 +691,66 @@ describe.skipIf(!HAS_CONTAINER_RUNTIME).each(SELECTED)("$name", (spec: StoreSpec
       await expect(bytesOf(read)).resolves.toEqual(countingBytes(8, start));
     });
 
+    /*
+     * `applyChecksum` used to run only inside `execute`, and `uploadPart` calls
+     * the transport directly — so a client told `requireOnPut` uploaded every
+     * part unchecked and reported success. Here the checksum is computed by this
+     * client and validated by a real store: a wrong digest, a wrong encoding or
+     * a header excluded from the signature all fail this, and only agreement
+     * passes it.
+     */
+    it("checksums every part of an upload when asked to", async () => {
+      const checked = clientFor(spec, store, {
+        checksum: { algorithm: "sha256", requireOnPut: true },
+      });
+      const key = `${randomPrefix()}checksummed.bin`;
+      const first = countingBytes(MIN_PART_BYTES);
+      const second = countingBytes(TAIL_PART_BYTES, MIN_PART_BYTES);
+      const whole = new Uint8Array(first.length + second.length);
+      whole.set(first, 0);
+      whole.set(second, first.length);
+
+      const { uploadId } = await checked.initiateMultipart({
+        key,
+        contentType: "application/octet-stream",
+      });
+      const partOne = await checked.uploadPart({ key, uploadId, partNumber: 1, body: first });
+      const partTwo = await checked.uploadPart({ key, uploadId, partNumber: 2, body: second });
+      await discard(
+        await checked.completeMultipart({
+          key,
+          uploadId,
+          parts: [
+            { partNumber: 1, etag: partOne.etag },
+            { partNumber: 2, etag: partTwo.etag },
+          ],
+        }),
+      );
+
+      const read = await checked.get({ key });
+      await expect(bytesOf(read).then(sha256Hex)).resolves.toBe(await sha256Hex(whole));
+    });
+
+    it("refuses to upload a streamed part it was told to checksum", async () => {
+      const checked = clientFor(spec, store, {
+        checksum: { algorithm: "sha256", requireOnPut: true },
+      });
+      const key = `${randomPrefix()}unchecksummable.bin`;
+
+      const { uploadId } = await checked.initiateMultipart({ key });
+      await expect(
+        checked.uploadPart({
+          key,
+          uploadId,
+          partNumber: 1,
+          body: streamOf(countingBytes(1024), 256),
+        }),
+      ).rejects.toThrow(/Unable to compute sha256 checksum/i);
+
+      /* Refused before sending, so the upload is still empty and still abortable. */
+      await expect(checked.abortMultipart({ key, uploadId })).resolves.toBeUndefined();
+    });
+
     it("aborts an upload, leaving neither the object nor the upload behind", async () => {
       const key = `${randomPrefix()}abandoned.bin`;
 
@@ -524,6 +767,41 @@ describe.skipIf(!HAS_CONTAINER_RUNTIME).each(SELECTED)("$name", (spec: StoreSpec
         client.uploadPart({ key, uploadId, partNumber: 2, body: "too late" }),
       );
       expect(stale.status).toBe(404);
+    });
+  });
+
+  /*
+   * The tenant-escape, against a real store.
+   *
+   * `users/a/../b/x` is a legal S3 key and an illegal URL path: every WHATWG
+   * parser removes the dot segment, so the request that used to leave here asked
+   * for `users/b/x` — a write outside the prefix it was scoped to, reported as a
+   * success under the name it never used. The client now refuses, and what this
+   * asserts is the consequence: after the refusal there is nothing at the
+   * escaped location, on either store.
+   */
+  describe("keys with dot segments", () => {
+    it("writes nothing rather than writing somewhere else", async () => {
+      const prefix = randomPrefix();
+
+      await expect(
+        client.put({ key: `${prefix}dir/../evil.txt`, body: "escaped", contentType: "text/plain" }),
+      ).rejects.toThrow(/dot segment/i);
+
+      const listed = await client.list({ prefix });
+      expect(listed.contents).toEqual([]);
+
+      const missing = await rejection(() => client.get({ key: `${prefix}evil.txt` }));
+      expect(missing.status).toBe(404);
+    });
+
+    it("keeps dots that are part of a name", async () => {
+      const key = `${randomPrefix()}archive..tar.gz`;
+
+      await seed(client, key, "not a dot segment", "application/gzip");
+
+      const read = await client.get({ key });
+      await expect(read.text()).resolves.toBe("not a dot segment");
     });
   });
 
@@ -565,6 +843,32 @@ describe.skipIf(!HAS_CONTAINER_RUNTIME).each(SELECTED)("$name", (spec: StoreSpec
       await expect(read.text()).resolves.toBe("written without credentials");
     });
 
+    /*
+     * The query of a presigned URL is not decoration: the store re-derives the
+     * canonical request from it and compares signatures. A space encoded as `+`
+     * on the wire and as `%20` in the signature is therefore a URL that fails
+     * its own signature, and this is the test that would have caught it — the
+     * value is one the store has no opinion about, so all it can be judging is
+     * the encoding.
+     */
+    it("serves a presigned GET whose key and query both contain spaces", async () => {
+      const key = `${randomPrefix()}my shared file.txt`;
+      await seed(client, key, "hello world", "text/plain");
+
+      const url = await client.getSignedUrl({
+        method: "GET",
+        key,
+        query: { "x-uns3-note": "a spaced value" },
+        expiresInSeconds: 300,
+      });
+      expect(url).toContain("my%20shared%20file.txt");
+      expect(url.slice(url.indexOf("?"))).not.toContain("+");
+
+      const read = await fetch(url);
+      expect(read.status).toBe(200);
+      await expect(read.text()).resolves.toBe("hello world");
+    });
+
     it("answers 404 to a presigned GET of a key that does not exist", async () => {
       const url = await client.getSignedUrl({
         method: "GET",
@@ -579,6 +883,35 @@ describe.skipIf(!HAS_CONTAINER_RUNTIME).each(SELECTED)("$name", (spec: StoreSpec
     });
   });
 });
+
+/**
+ * `bytes` as a stream, handed over in `chunkSize` pieces.
+ *
+ * Several chunks rather than one on purpose: a single-chunk stream is a buffer
+ * wearing a costume, and would pass even if the transfer were being collected
+ * and re-sent whole somewhere along the way.
+ */
+function streamOf(bytes: Uint8Array<ArrayBuffer>, chunkSize: number): ReadableStream<Uint8Array> {
+  let offset = 0;
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (offset >= bytes.length) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(bytes.slice(offset, offset + chunkSize));
+      offset += chunkSize;
+    },
+  });
+}
+
+/** Two parts as the one object they assemble into. */
+function joined(first: Uint8Array, second: Uint8Array): Uint8Array<ArrayBuffer> {
+  const whole = new Uint8Array(first.length + second.length);
+  whole.set(first, 0);
+  whole.set(second, first.length);
+  return whole;
+}
 
 /** The five keys the list assertions are written against, in lexicographic order. */
 async function seedTree(client: S3Client, prefix: string): Promise<void> {

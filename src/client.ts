@@ -4,6 +4,7 @@ import {
   applyQuery,
   createHeaders,
   defaultContentTypeResolver,
+  finalizeQuery,
   presignUrl,
   resolveContentType,
   send,
@@ -64,6 +65,12 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
 const MAX_INLINE_CHECKSUM_BYTES = 16 * 1024 * 1024;
 
 /**
+ * How far the endpoint's clock has to be from the one already in use before the
+ * client starts signing with the endpoint's instead. See `updateClockSkew`.
+ */
+const CLOCK_SKEW_THRESHOLD_MS = 5 * 60 * 1000;
+
+/**
  * High-level S3 interface that speaks the REST protocol with SigV4 signing
  * while remaining runtime agnostic. The client never buffers response bodies
  * implicitly and relies entirely on Fetch/Web Crypto primitives.
@@ -107,7 +114,8 @@ export class S3Client {
 
   /**
    * Executes a GET Object request and returns the raw {@link Response}. For
-   * streamed consumption prefer {@link Response.body} or {@link streamGet}.
+   * streamed consumption read {@link Response.body}, which this client never
+   * buffers on your behalf.
    *
    * Supports conditional requests via `ifMatch`, `ifNoneMatch`, `ifModifiedSince`,
    * and `ifUnmodifiedSince`. When the object hasn't changed, S3 may return a
@@ -218,6 +226,16 @@ export class S3Client {
   /**
    * Lists objects using the ListObjectsV2 API and parses a convenient result
    * structure for contents and common prefixes.
+   *
+   * Pagination follows `nextContinuationToken` while `isTruncated` is `true`.
+   * A store that ignores `list-type=2` and answers V1-style instead reports
+   * `nextMarker` and no token; that value goes back as `query: { marker }`, not
+   * as `continuationToken` — see {@link ListObjectsV2Response.nextMarker}.
+   *
+   * The request never asks for `encoding-type=url`, so keys come back as the
+   * store wrote them and are only XML-decoded. A caller who adds
+   * `query: { "encoding-type": "url" }` by hand gets percent-encoded keys and
+   * owns the decoding.
    *
    * @param params - Listing options such as prefix, delimiter, and pagination.
    * @example
@@ -371,6 +389,19 @@ export class S3Client {
    * Uploads a single part of a multipart upload. Returns the ETag required
    * by {@link completeMultipart} to assemble the final object.
    *
+   * The part body is a payload like any other, so a configured `checksum`
+   * applies to it exactly as it does to {@link put}: the header is computed and
+   * signed when the body can be buffered, and with `requireOnPut` a body that
+   * cannot be — a stream, or one over 16 MiB — is refused rather than sent
+   * unchecked.
+   *
+   * `contentLength` is a hint for stores that demand an explicit
+   * `Content-Length`, and it is signed along with everything else. A value that
+   * does not match the body is therefore not a rounding error: the request is
+   * either rejected for a bad signature or hangs and surfaces as a bare
+   * `fetch failed`, and neither is retried, because a PUT is not idempotent.
+   * Pass the byte length of the body or nothing at all.
+   *
    * @param params - Part upload options including uploadId, partNumber, and body.
    * @example
    * ```ts
@@ -404,6 +435,15 @@ export class S3Client {
     if (typeof params.contentLength === "number") {
       headers.set("content-length", String(params.contentLength));
     }
+
+    /*
+     * `uploadPart` talks to `perform` directly rather than through `execute`,
+     * which is where the checksum used to be applied — so a client configured
+     * with `requireOnPut` uploaded every part of every multipart upload with no
+     * checksum at all, and said nothing about it. Applied here, before signing,
+     * so the header the store validates is one the signature covers.
+     */
+    await this.applyChecksum("PUT", params.body, headers);
 
     const response = await this.perform({
       method: "PUT",
@@ -583,6 +623,14 @@ export class S3Client {
   private async perform(context: PerformContext): Promise<Response> {
     const credentials = await this.resolveCredentials();
     const unsignedPayload = shouldUseUnsignedPayload(context.method, context.body);
+    /*
+     * The query is re-encoded once, before the first signature: from here on the
+     * bytes on the wire are the bytes the signer canonicalizes. Running it later
+     * or twice would be harmless — decode-then-encode is a round trip — but
+     * every parameter is already in place by now.
+     */
+    finalizeQuery(context.url);
+    const streamedBody = hasBody(context.method) && isPayloadStream(context.body ?? null);
     const maxAttempts = Math.max(1, this.retryConfig.maxAttempts);
     let attempt = 0;
     let lastError: unknown;
@@ -606,12 +654,26 @@ export class S3Client {
         headers = result.headers;
       }
 
-      const request = new Request(context.url.toString(), {
+      const init: RequestInit = {
         method: context.method,
         headers,
         body: hasBody(context.method) ? (context.body ?? null) : undefined,
         signal: context.signal,
-      });
+      };
+
+      if (streamedBody) {
+        /*
+         * Required by the Fetch standard whenever the body is a stream, and
+         * enforced by undici, Deno, Bun and workerd alike: without it the
+         * `Request` constructor throws `duplex option is required` and nothing
+         * is ever sent. Set only for a stream body — it is invalid otherwise —
+         * and cast narrowly because the option is still missing from some
+         * `RequestInit` typings.
+         */
+        (init as RequestInit & { duplex: "half" }).duplex = "half";
+      }
+
+      const request = new Request(context.url.toString(), init);
 
       try {
         const { response } = await send({ request, signal: context.signal }, this.fetcher);
@@ -627,7 +689,9 @@ export class S3Client {
           response.body?.cancel?.();
         }
 
-        if (!this.shouldRetry(context.method, response, error, attempt, maxAttempts)) {
+        if (
+          !this.shouldRetry(context.method, streamedBody, response, error, attempt, maxAttempts)
+        ) {
           throw error;
         }
 
@@ -637,7 +701,9 @@ export class S3Client {
           throw error;
         }
 
-        if (!this.shouldRetry(context.method, undefined, error, attempt, maxAttempts)) {
+        if (
+          !this.shouldRetry(context.method, streamedBody, undefined, error, attempt, maxAttempts)
+        ) {
           throw ensureError(error);
         }
 
@@ -687,6 +753,25 @@ export class S3Client {
     return credentials;
   }
 
+  /*
+   * WHICH REQUESTS CARRY A CHECKSUM, AND WHY THE REST DO NOT.
+   *
+   * `x-amz-checksum-*` states the integrity of an object payload, so it belongs
+   * on the two calls that send one: `put` (through `execute`) and `uploadPart`.
+   * The other methods that reach `perform` directly were each looked at rather
+   * than wired up by reflex:
+   *
+   * - `list` is a GET with no body; there is nothing to checksum.
+   * - `abortMultipart` is a DELETE with no body; likewise.
+   * - `initiateMultipart` is a POST with an empty body. A checksum of nothing
+   *   says nothing, and the header S3 reads on this call is
+   *   `x-amz-checksum-algorithm`, which DECLARES what the parts will use — a
+   *   different statement that a caller can still make via `headers`.
+   * - `completeMultipart` is a POST whose body is the parts manifest, but
+   *   `x-amz-checksum-*` on that call is read as the composite checksum of the
+   *   assembled OBJECT, not of the XML. Sending a digest of the manifest there
+   *   would be a lie in a field that gets believed.
+   */
   private async applyChecksum(
     method: Methods,
     body: BodyInit | ReadableStream<Uint8Array> | null | undefined,
@@ -719,6 +804,24 @@ export class S3Client {
     return new Date(Date.now() + this.clockSkewMs);
   }
 
+  /**
+   * Adopts the endpoint's clock, but only when the difference is big enough to
+   * be one.
+   *
+   * Only a real response reaches here — a `fetch` that never completed throws
+   * long before, so a dead connection or a DNS failure cannot move the signing
+   * clock. Of the responses that do arrive, a `Date` header is a second-
+   * resolution stamp of when the answer was generated, not when it landed, so
+   * some difference is always measured and adopting each one made the clock
+   * wander for no reason. Worse, any intermediary that answers at all — a
+   * proxy, a captive portal, an error page — could shift every later signature.
+   *
+   * The threshold is AWS's own rule: a signature is valid for fifteen minutes,
+   * corrections start at five, and anything under that is latency rather than
+   * skew. It is measured against the clock already in use, not the raw local
+   * one, which is what lets a correction be dropped again once the local clock
+   * is the thing that gets fixed.
+   */
   private updateClockSkew(response: Response): void {
     const dateHeader = response.headers.get("date");
     if (!dateHeader) {
@@ -729,17 +832,32 @@ export class S3Client {
       return;
     }
     const skew = parsed - Date.now();
+    if (Math.abs(skew - this.clockSkewMs) < CLOCK_SKEW_THRESHOLD_MS) {
+      return;
+    }
     this.clockSkewMs = normalizeClockSkew(skew);
   }
 
   private shouldRetry(
     method: Methods,
+    bodyIsStream: boolean,
     response: Response | undefined,
     error: unknown,
     attempt: number,
     maxAttempts: number,
   ): boolean {
     if (attempt >= maxAttempts) {
+      return false;
+    }
+
+    /*
+     * A stream body is spent by the attempt that sent it — there is nothing
+     * left to put in a second request, and building one would fail with a "body
+     * already used" `TypeError` that buries the error actually worth reporting.
+     * This sits ahead of `retriable` deliberately: the predicate decides policy,
+     * and a consumed body is not policy.
+     */
+    if (bodyIsStream) {
       return false;
     }
 
@@ -1320,7 +1438,7 @@ function parseListObjectsV2(xml: string): ListObjectsV2Response {
   const contents: ListObjectsV2Response["contents"] = [];
   const commonPrefixes: string[] = [];
 
-  for (const match of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
+  for (const match of xml.matchAll(/<Contents(?:\s[^>]*)?>([\s\S]*?)<\/Contents\s*>/g)) {
     const section = match[1] ?? "";
     const key = extractTag(section, "Key");
     const size = extractTag(section, "Size");
@@ -1339,7 +1457,9 @@ function parseListObjectsV2(xml: string): ListObjectsV2Response {
     });
   }
 
-  for (const match of xml.matchAll(/<CommonPrefixes>([\s\S]*?)<\/CommonPrefixes>/g)) {
+  for (const match of xml.matchAll(
+    /<CommonPrefixes(?:\s[^>]*)?>([\s\S]*?)<\/CommonPrefixes\s*>/g,
+  )) {
     const prefix = extractTag(match[1] ?? "", "Prefix");
     if (prefix) {
       commonPrefixes.push(prefix);
@@ -1348,20 +1468,53 @@ function parseListObjectsV2(xml: string): ListObjectsV2Response {
 
   const isTruncated = extractTag(xml, "IsTruncated") === "true";
   const nextContinuationToken = extractTag(xml, "NextContinuationToken") ?? undefined;
+  /*
+   * A store that answers V1 semantics — several S3-compatible ones do, ignoring
+   * `list-type=2` outright — says "there is more" with `<NextMarker>` and never
+   * sends a continuation token. Surfaced under its own name rather than folded
+   * into `nextContinuationToken`, because the two are not interchangeable: a
+   * marker has to go back as `marker`, and quietly sending it as
+   * `continuation-token` would be ignored by the store that asked for it — the
+   * same page forever, wearing the fix's clothes.
+   */
+  const nextMarker = extractTag(xml, "NextMarker") ?? undefined;
 
   return {
     contents,
     commonPrefixes,
     isTruncated,
     nextContinuationToken,
+    nextMarker,
   };
 }
 
+/**
+ * Reads one element's text out of an XML fragment.
+ *
+ * The open-tag pattern tolerates attributes: `<Key>` and `<Key xmlns:x="…">`
+ * are the same element, and a namespace declaration on it is not a different
+ * one. It still will not match a longer name — `<KeyCount>` is not a `<Key>` —
+ * because an attribute has to be separated by whitespace.
+ */
 function extractTag(section: string, tag: string): string | undefined {
-  const regex = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "i");
+  const regex = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}\\s*>`, "i");
   const match = section.match(regex);
   const value = match?.[1];
-  return typeof value === "string" ? decodeXml(value) : undefined;
+  return typeof value === "string" ? decodeXmlText(value) : undefined;
+}
+
+const CDATA_SECTION = /^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/;
+
+/**
+ * Turns an element's raw content into the text it stands for.
+ *
+ * CDATA is the other way XML carries text that would otherwise need escaping,
+ * and its content is literal: `&amp;` inside one is five characters, not an
+ * ampersand, so the wrapper is stripped and nothing else is done to it.
+ */
+function decodeXmlText(raw: string): string {
+  const cdata = CDATA_SECTION.exec(raw);
+  return cdata ? cdata[1]! : decodeXml(raw);
 }
 
 function stripQuotes(value: string): string {
@@ -1371,13 +1524,50 @@ function stripQuotes(value: string): string {
   return value;
 }
 
+const XML_ENTITIES: Record<string, string> = {
+  quot: '"',
+  apos: "'",
+  lt: "<",
+  gt: ">",
+  amp: "&",
+};
+
+const XML_ENTITY = /&(#\d+|#[Xx][\dA-Fa-f]+|quot|apos|lt|gt|amp);/g;
+
+const MAX_CODE_POINT = 0x10_ff_ff;
+
+/**
+ * Decodes the entities an S3 response can contain, in a single pass.
+ *
+ * Single-pass is the whole design. Sequential replaces cascade, and decoding
+ * `&amp;` first — as this used to — feeds its own output to the passes after
+ * it: the text `&amp;lt;`, which is how a key containing the four characters
+ * `&lt;` is escaped, came back out as `<`. Here every reference is resolved
+ * once and never re-read, so `&amp;` is no more special than `&gt;` is.
+ *
+ * Numeric character references are decoded too, decimal and hexadecimal alike.
+ * They are not exotic: SeaweedFS escapes the quotes around an ETag as `&#34;`,
+ * which the old decoder left in place, so a listed etag never matched the one
+ * a HEAD reported. Anything unrecognised or outside Unicode is left exactly as
+ * written — a malformed reference is not worth failing a listing over.
+ */
 function decodeXml(value: string): string {
-  return value
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+  return value.replace(XML_ENTITY, (reference: string, body: string) => {
+    if (!body.startsWith("#")) {
+      return XML_ENTITIES[body] ?? reference;
+    }
+    const hex = body[1] === "x" || body[1] === "X";
+    const codePoint = Number.parseInt(hex ? body.slice(2) : body.slice(1), hex ? 16 : 10);
+    if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > MAX_CODE_POINT) {
+      return reference;
+    }
+    /*
+     * Lone surrogates are deliberately allowed through: an encoder that writes
+     * an astral character as the pair `&#55357;&#56832;` is writing two halves
+     * of one UTF-16 character, and JavaScript strings put them back together.
+     */
+    return String.fromCodePoint(codePoint);
+  });
 }
 
 function globalFetch(): typeof fetch | undefined {
