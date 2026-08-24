@@ -67,6 +67,32 @@ describe("S3Client", () => {
     expect(headers.get("authorization")).toMatch(/^AWS4-HMAC-SHA256/);
   });
 
+  it("declares an explicit content-length on a PUT", async () => {
+    let capturedRequest: Request | undefined;
+    const fetchMock = createFetchMock(async (request) => {
+      capturedRequest = request;
+      return new Response(null, { status: 200 });
+    });
+
+    const client = new S3Client({
+      region: "us-east-1",
+      endpoint: "https://s3.us-east-1.amazonaws.com",
+      credentials,
+      fetch: fetchMock,
+    });
+
+    const payload = new TextEncoder().encode("declared payload");
+    await client.put({
+      bucket: "my-bucket",
+      key: "declared.bin",
+      body: payload,
+      contentLength: payload.byteLength,
+    });
+
+    expect(capturedRequest).toBeDefined();
+    expect(capturedRequest!.headers.get("content-length")).toBe(String(payload.byteLength));
+  });
+
   it("performs anonymous GET when no credentials are provided", async () => {
     let capturedRequest: Request | undefined;
     const fetchMock = createFetchMock(async (request) => {

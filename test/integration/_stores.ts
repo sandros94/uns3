@@ -60,8 +60,8 @@ export interface StoreSpec {
    * A `ReadableStream` with no `Content-Length` goes out as
    * `Transfer-Encoding: chunked`. SeaweedFS reads it; RustFS answers `411
    * MissingContentLength` and is in good company doing so — AWS S3 requires a
-   * length on PUT too. Declaring one (`headers: { "content-length": … }` on a
-   * put, or `contentLength` on a part) satisfies every store, which is what the
+   * length on PUT too. Declaring one (`contentLength` on a put or on a part, or
+   * the header by hand) satisfies every store, which is what the
    * length-declaring tests assert; this flag only decides which side of the
    * disagreement the unknown-length tests assert.
    */

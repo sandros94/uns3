@@ -159,15 +159,17 @@ await client.put({
 
 A `ReadableStream` body is sent as it is produced. Two consequences are worth knowing: it is signed as `UNSIGNED-PAYLOAD` and cannot be checksummed (hashing it would mean buffering it, which is the thing a stream avoids), and it is never retried — the stream is consumed by the attempt that sent it, so there is nothing left to send a second time.
 
-Most stores also want a length. With none, the body goes out as `Transfer-Encoding: chunked`, which AWS S3 and several S3-compatible stores answer with `411 MissingContentLength`. Declare it whenever you know it:
+Most stores also want a length. With none, the body goes out as `Transfer-Encoding: chunked`, which AWS S3 and several S3-compatible stores answer with `411 MissingContentLength`. Declare it with `contentLength` whenever you know it:
 
 ```typescript
 await client.put({
   key: "large.bin",
   body: stream,
-  headers: { "content-length": String(byteLength) },
+  contentLength: byteLength,
 });
 ```
+
+The value is signed along with the rest of the request, so it has to be the real byte length: too small and the store rejects the signature or the body, too large and the connection waits for bytes that never arrive and fails as a bare `fetch failed`. Neither is retried, because a PUT is not idempotent. `uploadPart()` takes the same option, for the same reason.
 
 **Object keys**
 

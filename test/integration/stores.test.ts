@@ -161,6 +161,59 @@ describe.skipIf(!HAS_CONTAINER_RUNTIME).each(SELECTED)("$name", (spec: StoreSpec
       await expect(bytesOf(read)).resolves.toEqual(body);
     });
 
+    /*
+     * The counterpart of the 411 test below, and the reason `contentLength`
+     * exists: the same stream that RustFS refuses for having no length is
+     * accepted once one is declared, because undici then sends fixed-length
+     * rather than chunked. Asserted on both stores — the escape hatch is not
+     * allowed to be a RustFS-only dialect.
+     */
+    it("uploads a streamed body with a declared contentLength", async () => {
+      const key = `${randomPrefix()}declared.bin`;
+      const body = countingBytes(3 * 1024);
+
+      const written = await client.put({
+        key,
+        body: streamOf(body, 1024),
+        contentType: "application/octet-stream",
+        contentLength: body.byteLength,
+      });
+      expect(written.status).toBe(200);
+      await discard(written);
+
+      const read = await client.get({ key });
+      expect(read.status).toBe(200);
+      expect(read.headers.get("content-length")).toBe(String(body.byteLength));
+      await expect(bytesOf(read)).resolves.toEqual(body);
+    });
+
+    /*
+     * Declaring a length says how many bytes are coming, not what they are, so
+     * it does not make a stream checksummable — a digest still means buffering
+     * the thing a stream exists to avoid. `requireOnPut` therefore refuses this
+     * exactly as it refuses an undeclared stream, before anything is sent.
+     */
+    it("still refuses a streamed put it was told to checksum", async () => {
+      const checked = clientFor(spec, store, {
+        checksum: { algorithm: "sha256", requireOnPut: true },
+      });
+      const key = `${randomPrefix()}unchecksummable-put.bin`;
+      const body = countingBytes(1024);
+
+      await expect(
+        checked.put({
+          key,
+          body: streamOf(body, 256),
+          contentType: "application/octet-stream",
+          contentLength: body.byteLength,
+        }),
+      ).rejects.toThrow(/Unable to compute sha256 checksum/i);
+
+      /* Refused before sending, so nothing was written under the key. */
+      const missing = await rejection(() => checked.head({ key }));
+      expect(missing.status).toBe(404);
+    });
+
     it.skipIf(spec.chunkedUploads)("answers 411 to a body of unknown length", async () => {
       const key = `${randomPrefix()}chunked.bin`;
 

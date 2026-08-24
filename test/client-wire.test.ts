@@ -136,6 +136,31 @@ describe("request bytes", () => {
       expect(requests[0]!.headers.get("x-amz-content-sha256")).toBe("UNSIGNED-PAYLOAD");
     });
 
+    /*
+     * A stream with no length goes out chunked, which AWS S3 and RustFS refuse
+     * with `411 MissingContentLength`; `contentLength` is what makes a streamed
+     * PUT work against those stores. It has to be set before the request is
+     * signed, exactly as `uploadPart` sets it — a `content-length` the signature
+     * does not cover is one a strict store rejects.
+     */
+    it("signs the content-length a streaming PUT declares", async () => {
+      const { client, requests } = clientAnswering(() => new Response(null, { status: 200 }));
+      const body = "streamed body";
+      const length = new TextEncoder().encode(body).byteLength;
+
+      await client.put({
+        bucket: BUCKET,
+        key: "streamed.bin",
+        body: streamOf(body),
+        contentType: "application/octet-stream",
+        contentLength: length,
+      });
+
+      expect(requests[0]!.headers.get("content-length")).toBe(String(length));
+      expect(requests[0]!.headers.get("authorization")).toContain("content-length");
+      expect(signatureMatches(requests[0]!)).toBe(true);
+    });
+
     it("dispatches a streaming uploadPart body", async () => {
       const { client, requests } = clientAnswering(
         () => new Response(null, { status: 200, headers: { etag: '"part-etag"' } }),

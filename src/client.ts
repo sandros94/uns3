@@ -38,6 +38,7 @@ import { isPlainObject } from "./utils.ts";
 
 interface RequestOptions {
   body?: BodyInit | ReadableStream<Uint8Array> | null;
+  contentLength?: number;
   contentType?: string;
   cacheControl?: string;
   contentDisposition?: string;
@@ -173,6 +174,16 @@ export class S3Client {
    * Accepts `200` and `412` by default. Set `expectedStatus` to replace that list
    * entirely — stores that answer `201` to a PUT need it.
    *
+   * `contentLength` declares the body's size, and is what makes a streamed
+   * upload work everywhere: a stream with no length goes out as
+   * `Transfer-Encoding: chunked`, which RustFS and AWS S3 refuse with `411
+   * MissingContentLength`, while a declared length is sent fixed-length
+   * instead. It is signed along with everything else, so a value that does not
+   * match the body is not a rounding error: the request is either rejected for
+   * a bad signature or hangs and surfaces as a bare `fetch failed`, and neither
+   * is retried, because a PUT is not idempotent. Pass the byte length of the
+   * body or nothing at all.
+   *
    * @param params - Upload configuration including payload and metadata.
    * @example
    * ```ts
@@ -199,6 +210,7 @@ export class S3Client {
     );
     return await this.execute("PUT", params, {
       body,
+      contentLength: params.contentLength,
       contentType: resolvedContentType,
       cacheControl: params.cacheControl,
       contentDisposition: params.contentDisposition,
@@ -599,6 +611,15 @@ export class S3Client {
       ifModifiedSince: params.ifModifiedSince,
       ifUnmodifiedSince: params.ifUnmodifiedSince,
     });
+
+    /*
+     * Applied here, before signing, so the length the store reads is one the
+     * signature covers — the same placement, and the same reasoning, as
+     * `uploadPart`.
+     */
+    if (typeof options.contentLength === "number") {
+      headers.set("content-length", String(options.contentLength));
+    }
 
     if (params.query) {
       applyQuery(url, params.query);

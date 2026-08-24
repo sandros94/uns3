@@ -180,6 +180,21 @@ export interface PutObjectParams
    * avoiding.
    */
   body: BodyInit | ReadableStream<Uint8Array> | null | object;
+  /**
+   * Declares the body's size in bytes, which is what makes a streamed upload
+   * work everywhere. A `ReadableStream` with no length goes out as
+   * `Transfer-Encoding: chunked`, and RustFS — like AWS S3 — refuses that with
+   * `411 MissingContentLength`; declaring the length makes the runtime send a
+   * fixed-length body instead. Not validated against the actual body size — the
+   * caller is responsible for accuracy.
+   *
+   * The header is signed with the rest of the request, so a wrong value is not
+   * a wrong number: too small and the store rejects the signature or the body,
+   * too large and the connection waits for bytes that never come and surfaces
+   * as a bare `fetch failed`. Neither is retried, because a `PUT` is not
+   * idempotent. Pass the body's byte length or leave it out.
+   */
+  contentLength?: number;
   /** Explicit MIME type. Set to `false` to suppress automatic detection. */
   contentType?: string | false;
   /** Value for the `Cache-Control` header. */
