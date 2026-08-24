@@ -82,7 +82,16 @@ const partialResponse = await client.get({
   key: "my-large-file.zip",
   range: { start: 0, end: 1023 }, // first 1KB
 });
+console.log(partialResponse.status); // 206
 const chunk = await partialResponse.arrayBuffer();
+```
+
+**Expected statuses**
+
+Every method accepts `expectedStatus`; anything else throws an `S3Error`. The defaults are `200`/`206`/`304` for `get()` and `head()`, `200`/`412` for `put()` and `completeMultipart()`, `200`/`204` for `del()`, `200`/`202`/`204` for `abortMultipart()`, and `200` elsewhere. Passing your own value _replaces_ the default rather than adding to it, which is how you teach the client about a store that answers, say, `201` to a PUT:
+
+```typescript
+await client.put({ key: "file.txt", body: "hi", expectedStatus: [200, 201] });
 ```
 
 **Conditional Requests & Caching**
@@ -235,9 +244,7 @@ Upload a part of the file. You need to provide the `uploadId` and a `partNumber`
 
 ```typescript
 const parts = [];
-const file = new Blob([
-  /* ... large content ... */
-]);
+const file = new Blob([/* ... large content ... */]);
 const chunkSize = 5 * 1024 * 1024; // 5MB
 
 for (let i = 0; i * chunkSize < file.size; i++) {

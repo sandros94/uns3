@@ -326,7 +326,7 @@ describe("S3Client", () => {
       return new Response(null, {
         status: 304,
         headers: {
-          etag: '"abc123"',
+          "etag": '"abc123"',
           "last-modified": "Sun, 01 Jan 2023 00:00:00 GMT",
         },
       });
@@ -354,7 +354,7 @@ describe("S3Client", () => {
       return new Response(null, {
         status: 304,
         headers: {
-          etag: '"def456"',
+          "etag": '"def456"',
           "last-modified": "Mon, 02 Jan 2023 00:00:00 GMT",
         },
       });
@@ -393,7 +393,7 @@ describe("S3Client", () => {
         return new Response(errorXml, {
           status: 403,
           headers: {
-            date: "Wed, 01 Feb 2023 00:00:00 GMT",
+            "date": "Wed, 01 Feb 2023 00:00:00 GMT",
             "content-type": "application/xml",
           },
         });

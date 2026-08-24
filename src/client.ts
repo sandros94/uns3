@@ -113,6 +113,10 @@ export class S3Client {
    * and `ifUnmodifiedSince`. When the object hasn't changed, S3 may return a
    * `304 Not Modified` response with no body, which is treated as success.
    *
+   * Accepts `200`, `206`, and `304` by default — `206 Partial Content` because a
+   * `range` makes it the correct answer. Set `expectedStatus` to replace that
+   * list entirely.
+   *
    * @param params - Request configuration including bucket and key.
    * @example
    * ```ts
@@ -121,7 +125,9 @@ export class S3Client {
    * ```
    */
   async get(params: GetObjectParams): Promise<Response> {
-    return await this.execute("GET", params, { expectedStatus: [200, 304] });
+    return await this.execute("GET", params, {
+      expectedStatus: params.expectedStatus ?? [200, 206, 304],
+    });
   }
 
   /**
@@ -131,6 +137,10 @@ export class S3Client {
    * and `ifUnmodifiedSince`. When the object hasn't changed, S3 may return a
    * `304 Not Modified` response, which is treated as success.
    *
+   * Accepts `200`, `206`, and `304` by default — a ranged HEAD answers `206` for
+   * the same reason a ranged GET does. Set `expectedStatus` to replace that list
+   * entirely.
+   *
    * @param params - Request configuration including bucket and key.
    * @example
    * ```ts
@@ -139,7 +149,9 @@ export class S3Client {
    * ```
    */
   async head(params: HeadObjectParams): Promise<Response> {
-    return await this.execute("HEAD", params, { expectedStatus: [200, 304] });
+    return await this.execute("HEAD", params, {
+      expectedStatus: params.expectedStatus ?? [200, 206, 304],
+    });
   }
 
   /**
@@ -149,6 +161,9 @@ export class S3Client {
    * Supports optional conditional headers (`ifMatch`, `ifNoneMatch`) for conditional
    * overwrites. Note that not all S3-compatible providers support these headers.
    * When conditions fail, S3 returns `412 Precondition Failed`.
+   *
+   * Accepts `200` and `412` by default. Set `expectedStatus` to replace that list
+   * entirely — stores that answer `201` to a PUT need it.
    *
    * @param params - Upload configuration including payload and metadata.
    * @example
@@ -180,12 +195,13 @@ export class S3Client {
       cacheControl: params.cacheControl,
       contentDisposition: params.contentDisposition,
       contentEncoding: params.contentEncoding,
-      expectedStatus: [200, 412],
+      expectedStatus: params.expectedStatus ?? [200, 412],
     });
   }
 
   /**
-   * Deletes an object. Treats both 200 and 204 responses as success.
+   * Deletes an object. Treats both 200 and 204 responses as success; set
+   * `expectedStatus` to replace that list entirely.
    *
    * @param params - Request configuration including bucket and key.
    * @example
@@ -194,7 +210,9 @@ export class S3Client {
    * ```
    */
   async del(params: DeleteObjectParams): Promise<Response> {
-    return await this.execute("DELETE", params, { expectedStatus: [200, 204] });
+    return await this.execute("DELETE", params, {
+      expectedStatus: params.expectedStatus ?? [200, 204],
+    });
   }
 
   /**
@@ -238,7 +256,7 @@ export class S3Client {
       headers,
       bucket,
       key: undefined,
-      expectedStatus: 200,
+      expectedStatus: params.expectedStatus ?? 200,
       signal: params.signal,
     });
 
@@ -248,6 +266,9 @@ export class S3Client {
 
   /**
    * Generates a SigV4 presigned URL for the provided method and object key.
+   *
+   * Purely local: nothing is sent, so `expectedStatus` and `signal` have no
+   * effect here — whoever later fetches the URL owns the response.
    *
    * @param params - Method, bucket/key, expiry, and optional overrides.
    * @example
@@ -333,7 +354,7 @@ export class S3Client {
       headers,
       bucket,
       key,
-      expectedStatus: 200,
+      expectedStatus: params.expectedStatus ?? 200,
       signal: params.signal,
     });
 
@@ -391,7 +412,7 @@ export class S3Client {
       body: params.body,
       bucket,
       key,
-      expectedStatus: 200,
+      expectedStatus: params.expectedStatus ?? 200,
       signal: params.signal,
     });
 
@@ -462,7 +483,7 @@ export class S3Client {
       body: payload,
       bucket,
       key,
-      expectedStatus: [200, 412],
+      expectedStatus: params.expectedStatus ?? [200, 412],
       signal: params.signal,
     });
   }
@@ -504,7 +525,8 @@ export class S3Client {
       headers,
       bucket,
       key,
-      expectedStatus: [200, 202, 204], // TODO: study if this should also support 412
+      // TODO: study if this should also support 412
+      expectedStatus: params.expectedStatus ?? [200, 202, 204],
       signal: params.signal,
     });
 

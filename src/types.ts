@@ -130,7 +130,11 @@ export interface BaseRequest {
     string,
     string | number | boolean | undefined | Array<string | number | boolean | undefined>
   >;
-  /** Expected HTTP status code(s); a mismatch throws an `S3Error`. */
+  /**
+   * Expected HTTP status code(s); a mismatch throws an `S3Error`. Replaces the
+   * calling method's default list rather than adding to it, so asking for `200`
+   * alone makes a `304` an error. Ignored by `getSignedUrl`, which sends nothing.
+   */
   expectedStatus?: number | number[];
   /** Abort signal to cancel the request. */
   signal?: AbortSignal;
