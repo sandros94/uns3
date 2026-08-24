@@ -1,0 +1,157 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.17.0
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare development build
+        run: pnpm dev:prepare
+
+      - name: Lint
+        run: pnpm lint
+
+  typecheck:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.17.0
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare development build
+        run: pnpm dev:prepare
+
+      - name: Typecheck code
+        run: pnpm typecheck
+
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.17.0
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare development build
+        run: pnpm dev:prepare
+
+      - name: Test code
+        run: pnpm test:unit
+
+      - name: Build packages
+        run: pnpm build
+
+  integration:
+    # The real-store battery. Each store is a container the suite starts itself
+    # via testcontainers, so the matrix only has to name which one to run; with
+    # no container runtime the suite skips rather than fails.
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        store: [seaweedfs, rustfs]
+
+    env:
+      UNS3_TEST_STORES: ${{ matrix.store }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.17.0
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare development build
+        run: pnpm dev:prepare
+
+      - name: Test against ${{ matrix.store }}
+        run: pnpm test:integration
+
+  preview:
+    # Continuous preview packages via pkg.pr.new — published only once the same
+    # commit has passed everything above, so a preview is never ahead of CI.
+    needs: [lint, typecheck, test, integration]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.17.0
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare development build
+        run: pnpm dev:prepare
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Publish to pkg.pr.new
+        run: pnpx pkg-pr-new publish --pnpm

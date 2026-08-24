@@ -6,17 +6,36 @@ uns3 is a tiny, zero-dependency, runtime-agnostic S3 client that works across No
 
 ## Commands
 
-- **Install**: `pnpm install` (uses pnpm via Corepack)
-- **Build**: `pnpm build` (uses obuild)
-- **Lint**: `pnpm lint` (ESLint + Prettier on `src test docs`)
-- **Lint fix**: `pnpm lint:fix` (automd + ESLint fix + Prettier write)
-- **Type check**: `pnpm test:types` (`tsc --noEmit --skipLibCheck`)
-- **Test all**: `pnpm test` (lint + type check + vitest)
-- **Run tests only**: `pnpm vitest run`
+- **Install**: `pnpm install` (pnpm via Corepack, pinned by `packageManager`)
+- **Build**: `pnpm build` (obuild)
+- **Prepare**: `pnpm dev:prepare` (stub build + git hooks; what CI runs first)
+- **Lint**: `pnpm lint` (`oxlint .` then `oxfmt --check .`)
+- **Lint fix**: `pnpm fmt` (automd + `oxlint --fix` + `oxfmt`)
+- **Type check**: `pnpm typecheck` (`tsgo --noEmit`)
+- **Test all**: `pnpm test` (both vitest projects)
+- **Unit only**: `pnpm test:unit` (fast; no container runtime needed)
+- **Integration only**: `pnpm test:integration` (real stores in containers)
 - **Run a single test**: `pnpm vitest run test/core/signer.test.ts`
 - **Run tests in watch**: `pnpm vitest`
 - **Benchmarks**: `pnpm bench`
-- **Dev playground**: `pnpm dev` (listhen watching `playground/main.ts`)
+
+## Tests
+
+Two vitest projects, declared in `vitest.config.ts`:
+
+- **`unit`** — everything under `test/` except `test/integration/`. Requests are
+  answered by a `fetch` mock, so the suite needs nothing but a process. Keep it
+  that way. `test/client.test.ts` also carries an env-gated block that talks to a
+  real remote bucket; it stays skipped unless the `VITE_S3_*` variables are set.
+- **`integration`** — `test/integration/`, the same battery run against real
+  S3-compatible stores started as containers with testcontainers. Selected with
+  `UNS3_TEST_STORES` (comma-separated), and skipped outright when there is no
+  container runtime, so a machine without docker still gets a green `pnpm test`.
+
+Releases go through `uppt` (`.github/workflows/release.yml`): a release PR on
+push to main, a tag and GitHub Release on merge, then a `pnpm pack` and an OIDC
+trusted publish to npm from the `npm` environment. There is no local release
+script — do not add one.
 
 ## Architecture
 
@@ -52,8 +71,14 @@ Uses `obuild` with rolldown in `neutral` platform mode. Three bundle entry point
 
 ## Conventions
 
-- ESLint config: `eslint-config-unjs` with `unicorn/no-null` and `unicorn/no-nested-ternary` disabled.
+- Lint and format are oxc: `.oxlintrc.json` (type-aware, via `oxlint-tsgolint`) and
+  `.oxfmtrc.json`. Those exact filenames are what the tools discover — an earlier
+  `.oxclintrc.json` / `.oxcfmtrc.json` pair was silently never read.
 - Source files use `.ts` extensions in imports (e.g., `import { S3Error } from "./error.ts"`).
 - No runtime dependencies — all crypto uses `crypto.subtle`, all HTTP uses `fetch`.
 - XML responses are parsed with simple regex extraction (`extractTag`), not a DOM parser.
+- Every public method takes `expectedStatus` and must honor it as
+  `params.expectedStatus ?? <its own default>`. The caller's list _replaces_ the
+  default; never merge, and never hard-code past it. `get`/`head` include `206`
+  in their defaults because they serialize the `Range` header themselves.
 - The project is in active development / pre-1.0. Expect breaking changes.

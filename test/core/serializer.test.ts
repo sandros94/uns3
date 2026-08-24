@@ -16,10 +16,10 @@ describe("serializer helpers", () => {
   it("applies query parameters including arrays", () => {
     const url = new URL("https://example.com");
     applyQuery(url, {
-      prefix: "photos/",
+      "prefix": "photos/",
       "max-keys": 100,
-      marker: ["a", "b"],
-      active: true,
+      "marker": ["a", "b"],
+      "active": true,
     });
 
     expect(url.searchParams.getAll("marker")).toEqual(["a", "b"]);

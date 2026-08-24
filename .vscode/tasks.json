@@ -6,29 +6,37 @@
       "type": "shell",
       "command": "pnpm lint",
       "isBackground": false,
-      "problemMatcher": ["$eslint-stylish"],
+      "problemMatcher": [],
       "group": "build"
     },
     {
-      "label": "lint:fix",
+      "label": "fmt",
       "type": "shell",
-      "command": "pnpm lint:fix",
+      "command": "pnpm fmt",
       "isBackground": false,
-      "problemMatcher": ["$eslint-stylish"],
+      "problemMatcher": [],
       "group": "build"
     },
     {
-      "label": "test",
+      "label": "test:unit",
       "type": "shell",
-      "command": "pnpm test",
+      "command": "pnpm test:unit",
       "isBackground": false,
-      "problemMatcher": ["$tsc", "$eslint-stylish"],
-      "group": "build"
+      "problemMatcher": [],
+      "group": "test"
     },
     {
-      "label": "test:types",
+      "label": "test:integration",
       "type": "shell",
-      "command": "pnpm test:types",
+      "command": "pnpm test:integration",
+      "isBackground": false,
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
+      "label": "typecheck",
+      "type": "shell",
+      "command": "pnpm typecheck",
       "isBackground": false,
       "problemMatcher": ["$tsc"],
       "group": "build"

@@ -20,7 +20,11 @@
     "composite": true,
     "isolatedDeclarations": true,
     "allowImportingTsExtensions": true,
-    "lib": ["ESNext", "DOM"]
+    "lib": ["ESNext", "DOM"],
+    // `src/` stays runtime agnostic and only reads `globalThis.Buffer` behind a
+    // guard; the Node types are here so that guard, and the test harness that
+    // does reach for Node built-ins, both typecheck.
+    "types": ["node"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts"],
   "exclude": ["node_modules", "dist"]

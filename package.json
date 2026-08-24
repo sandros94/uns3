@@ -26,31 +26,32 @@
     }
   },
   "scripts": {
-    "postinstall": "pnpm simple-git-hooks",
     "build": "obuild",
-    "dev:prepare": "obuild --stub",
+    "dev:prepare": "obuild --stub && pnpm simple-git-hooks",
     "lint": "oxlint . && oxfmt --check .",
     "fmt": "automd && oxlint --fix . && oxfmt .",
     "prepack": "pnpm build",
-    "release": "pnpm test && pnpm prepack && changelogen --release --push",
     "test": "vitest run --slowTestThreshold=1000",
+    "test:unit": "vitest run --slowTestThreshold=1000 --project unit",
+    "test:integration": "vitest run --slowTestThreshold=1000 --project integration",
     "test:coverage": "vitest run --coverage --slowTestThreshold=1000",
     "typecheck": "tsgo --noEmit",
     "bench": "vitest bench --run"
   },
   "devDependencies": {
     "@types/node": "^24",
-    "@typescript/native-preview": "7.0.0-dev.20260307.1",
-    "@vitest/coverage-v8": "^4.0.18",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
+    "@vitest/coverage-v8": "^4.1.11",
     "automd": "^0.4.3",
-    "changelogen": "^0.6.2",
-    "nano-staged": "^0.9.0",
-    "obuild": "^0.4.20",
-    "oxfmt": "^0.36.0",
-    "oxlint": "^1.51.0",
+    "nano-staged": "^1.0.2",
+    "obuild": "^0.4.38",
+    "oxfmt": "^0.64.0",
+    "oxlint": "^1.79.0",
+    "oxlint-tsgolint": "^7.0.2001",
     "simple-git-hooks": "^2.13.1",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.18"
+    "testcontainers": "^12.1.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
   },
   "resolutions": {
     "uns3": "link:."
@@ -59,12 +60,24 @@
     "pre-commit": "./node_modules/.bin/nano-staged"
   },
   "nano-staged": {
-    "*.{js,ts,mjs,cjs,json,yml,md}": [
+    "*.{js,ts,mjs,cjs,json,yml,yaml,md}": [
       "pnpm run fmt"
     ]
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.23.0",
+      "onFail": "download"
+    },
+    "runtime": {
+      "name": "node",
+      "version": ">=24.17.0",
+      "onFail": "error"
+    }
   },
   "engines": {
     "node": "^22.12 || >=24"
   },
-  "packageManager": "pnpm@10.32.0"
+  "packageManager": "pnpm@11.23.0"
 }
