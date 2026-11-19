@@ -766,12 +766,13 @@ describe.skipIf(!canRun(SELECTED)).each(SELECTED)("$name", (spec: StoreSpec) => 
       });
       const partOne = await checked.uploadPart({ key, uploadId, partNumber: 1, body: first });
       const partTwo = await checked.uploadPart({ key, uploadId, partNumber: 2, body: second });
+      expect(partOne.checksum).toBeTruthy();
       await checked.completeMultipart({
         key,
         uploadId,
         parts: [
-          { partNumber: 1, etag: partOne.etag },
-          { partNumber: 2, etag: partTwo.etag },
+          { partNumber: 1, etag: partOne.etag, checksum: partOne.checksum },
+          { partNumber: 2, etag: partTwo.etag, checksum: partTwo.checksum },
         ],
       });
 

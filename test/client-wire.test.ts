@@ -246,6 +246,109 @@ describe("request bytes", () => {
 
       expect(requests[0]!.headers.has("x-amz-checksum-sha256")).toBe(false);
     });
+
+    it("keeps a checksum the caller computed, even on a stream", async () => {
+      const { client, requests } = clientAnswering(
+        () => new Response(null, { status: 200, headers: { etag: '"part-etag"' } }),
+        { checksum: { algorithm: "sha256", requireOnPut: true } },
+      );
+
+      await client.put({
+        bucket: BUCKET,
+        key: "streamed.bin",
+        body: streamOf("payload"),
+        headers: { "x-amz-checksum-sha256": "precomputed" },
+      });
+
+      expect(requests[0]!.headers.get("x-amz-checksum-sha256")).toBe("precomputed");
+    });
+
+    it("declares the algorithm on initiation when every part must carry it", async () => {
+      const initiated = async (requireOnPut: boolean): Promise<string | null> => {
+        const { client, requests } = clientAnswering(
+          () =>
+            new Response(
+              "<InitiateMultipartUploadResult><UploadId>u</UploadId></InitiateMultipartUploadResult>",
+            ),
+          { checksum: { algorithm: "crc32c", requireOnPut } },
+        );
+        await client.initiateMultipart({ bucket: BUCKET, key: "big.bin" });
+        return requests[0]!.headers.get("x-amz-checksum-algorithm");
+      };
+
+      await expect(initiated(true)).resolves.toBe("CRC32C");
+      await expect(initiated(false)).resolves.toBeNull();
+    });
+
+    it("carries each part's checksum from its upload to the completion", async () => {
+      const { client, requests } = clientAnswering(
+        (request) =>
+          request.method === "PUT"
+            ? new Response(null, {
+                status: 200,
+                headers: { "etag": '"p1"', "x-amz-checksum-crc32c": "yZRlqg==" },
+              })
+            : new Response(
+                "<CompleteMultipartUploadResult><ETag>&quot;e&quot;</ETag></CompleteMultipartUploadResult>",
+              ),
+        { checksum: { algorithm: "crc32c" } },
+      );
+
+      const part = await client.uploadPart({
+        bucket: BUCKET,
+        key: "big.bin",
+        uploadId: "u",
+        partNumber: 1,
+        body: "part",
+      });
+      await client.completeMultipart({
+        bucket: BUCKET,
+        key: "big.bin",
+        uploadId: "u",
+        parts: [{ partNumber: 1, etag: part.etag, checksum: part.checksum }],
+      });
+
+      expect(part.checksum).toBe("yZRlqg==");
+      await expect(requests[1]!.text()).resolves.toContain(
+        "<ChecksumCRC32C>yZRlqg==</ChecksumCRC32C>",
+      );
+    });
+  });
+
+  /*
+   * A payload is hashed once per request, not once per attempt, and a Blob too
+   * large to hold is signed `UNSIGNED-PAYLOAD` rather than read into memory.
+   */
+  describe("payload hashing", () => {
+    it("reads a Blob body once, however many attempts it takes", async () => {
+      let attempts = 0;
+      const { client, requests } = clientAnswering(
+        () =>
+          ++attempts === 1
+            ? new Response("<Error><Code>InternalError</Code></Error>", { status: 500 })
+            : new Response(null, { status: 200 }),
+        { retry: { maxAttempts: 2, baseDelayMs: 0 } },
+      );
+      const body = new Blob(["payload"]);
+      const read = vi.spyOn(body, "arrayBuffer");
+
+      await client.put({ bucket: BUCKET, key: "a.bin", body });
+
+      expect(requests).toHaveLength(2);
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(signatureMatches(requests[1]!)).toBe(true);
+    });
+
+    it("signs a Blob too large to hold without reading it", async () => {
+      const { client, requests } = clientAnswering(() => new Response(null, { status: 200 }));
+      const body = new Blob([new Uint8Array(16 * 1024 * 1024 + 1)]);
+      const read = vi.spyOn(body, "arrayBuffer");
+
+      await client.put({ bucket: BUCKET, key: "big.bin", body });
+
+      expect(read).not.toHaveBeenCalled();
+      expect(requests[0]!.headers.get("x-amz-content-sha256")).toBe("UNSIGNED-PAYLOAD");
+    });
   });
 
   /*

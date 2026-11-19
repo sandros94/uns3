@@ -393,6 +393,16 @@ export class S3Client {
       contentEncoding: params.contentEncoding,
     });
 
+    /*
+     * Declared only when every part is bound to carry a checksum: a store holds
+     * an upload that declared one to it, and a part sent without (a stream the
+     * client could not hash) would be refused.
+     */
+    const { algorithm, requireOnPut } = this.checksumConfig;
+    if (algorithm !== "none" && requireOnPut && !headers.has("x-amz-checksum-algorithm")) {
+      headers.set("x-amz-checksum-algorithm", algorithm.toUpperCase());
+    }
+
     const uploadId = await this.performXml(
       {
         method: "POST",
@@ -461,20 +471,15 @@ export class S3Client {
       headers.set("content-length", String(params.contentLength));
     }
 
-    /*
-     * `uploadPart` talks to `perform` directly rather than through `execute`,
-     * which is where the checksum used to be applied — so a client configured
-     * with `requireOnPut` uploaded every part of every multipart upload with no
-     * checksum at all, and said nothing about it. Applied here, before signing,
-     * so the header the store validates is one the signature covers.
-     */
-    await this.applyChecksum("PUT", params.body, headers);
+    /* Applied before signing, so the header the store validates is one the signature covers. */
+    const body = await materializeBody(params.body);
+    await this.applyChecksum(body, headers);
 
     const response = await this.perform({
       method: "PUT",
       url,
       headers,
-      body: params.body,
+      body,
       bucket,
       key,
       expectedStatus: params.expectedStatus ?? 200,
@@ -492,7 +497,12 @@ export class S3Client {
       });
     }
 
-    return { etag: ensureQuotedEtag(etagHeader) };
+    const { algorithm } = this.checksumConfig;
+    const checksum =
+      algorithm === "none" ? undefined : response.headers.get(checksumHeader(algorithm));
+    return checksum
+      ? { etag: ensureQuotedEtag(etagHeader), checksum }
+      : { etag: ensureQuotedEtag(etagHeader) };
   }
 
   /**
@@ -526,7 +536,7 @@ export class S3Client {
     const key = this.resolveKey(params);
     const uploadId = validateUploadId(params.uploadId);
     const parts = normalizeCompletedParts(params.parts);
-    const payload = buildCompleteMultipartXml(parts);
+    const payload = buildCompleteMultipartXml(parts, this.checksumConfig.algorithm);
 
     const url = buildRequestUrl({
       endpoint: this.endpoint,
@@ -650,13 +660,14 @@ export class S3Client {
       applyQuery(url, params.query);
     }
 
-    await this.applyChecksum(method, options.body, headers);
+    const body = await materializeBody(options.body);
+    if (method === "PUT") await this.applyChecksum(body, headers);
 
     const response = await this.perform({
       method,
       url,
       headers,
-      body: options.body,
+      body,
       bucket,
       key,
       expectedStatus: options.expectedStatus,
@@ -754,6 +765,8 @@ export class S3Client {
           datetime: this.createSigningDate(),
         });
         headers = result.headers;
+        /* The payload is hashed once: every later attempt signs the same hash. */
+        context.headers.set("x-amz-content-sha256", result.payloadHash);
       }
 
       const init: RequestInit = {
@@ -897,26 +910,27 @@ export class S3Client {
    * - `list` is a GET with no body; there is nothing to checksum.
    * - `abortMultipart` is a DELETE with no body; likewise.
    * - `initiateMultipart` is a POST with an empty body. A checksum of nothing
-   *   says nothing, and the header S3 reads on this call is
-   *   `x-amz-checksum-algorithm`, which DECLARES what the parts will use — a
-   *   different statement that a caller can still make via `headers`.
+   *   says nothing. The header S3 reads on this call is
+   *   `x-amz-checksum-algorithm`, which DECLARES what the parts will use, and
+   *   is sent when `requireOnPut` guarantees every part carries one.
    * - `completeMultipart` is a POST whose body is the parts manifest, but
    *   `x-amz-checksum-*` on that call is read as the composite checksum of the
    *   assembled OBJECT, not of the XML. Sending a digest of the manifest there
-   *   would be a lie in a field that gets believed.
+   *   would be a lie in a field that gets believed. Each part's own checksum
+   *   goes in the manifest instead.
+   *
+   * A checksum header the caller already set is theirs, and is left alone.
    */
   private async applyChecksum(
-    method: Methods,
     body: BodyInit | ReadableStream<Uint8Array> | null | undefined,
     headers: Headers,
   ): Promise<void> {
-    if (method.toUpperCase() !== "PUT") {
-      return;
-    }
-
     const algorithm = this.checksumConfig.algorithm;
     if (algorithm === "none") {
       return;
+    }
+    for (const name of headers.keys()) {
+      if (name.startsWith("x-amz-checksum-")) return;
     }
 
     const normalized = await normalizeBodyForChecksum(body, MAX_INLINE_CHECKSUM_BYTES);
@@ -929,8 +943,11 @@ export class S3Client {
       return;
     }
 
-    const value = await computeChecksumValue(normalized.bytes, algorithm);
-    headers.set(resolveChecksumHeaderName(algorithm), value);
+    const value =
+      algorithm === "sha256"
+        ? await computeSha256Base64(normalized.bytes)
+        : computeCrc32cBase64(normalized.bytes);
+    headers.set(checksumHeader(algorithm), value);
   }
 
   private createSigningDate(): Date {
@@ -1128,16 +1145,9 @@ async function normalizeBodyForChecksum(
     return { bytes: view, size: view.byteLength };
   }
 
-  if (typeof Blob !== "undefined" && body instanceof Blob) {
-    if (body.size > maxBytes) {
-      return { reason: "too-large" };
-    }
-    const buffer = await body.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    if (bytes.byteLength > maxBytes) {
-      return { reason: "too-large" };
-    }
-    return { bytes, size: bytes.byteLength };
+  if (isBlob(body)) {
+    /* Only a Blob too large to hold is still a Blob here. */
+    return { reason: "too-large" };
   }
 
   if (typeof ReadableStream !== "undefined" && body instanceof ReadableStream) {
@@ -1161,21 +1171,22 @@ function formatChecksumFailureReason(reason: ChecksumFailureReason): string {
   }
 }
 
-async function computeChecksumValue(
-  bytes: Uint8Array,
-  algorithm: ChecksumAlgorithm,
-): Promise<string> {
-  if (algorithm === "sha256") {
-    return await computeSha256Base64(bytes);
-  }
-  if (algorithm === "crc32c") {
-    return computeCrc32cBase64(bytes);
-  }
-  throw new Error(`Unsupported checksum algorithm: ${algorithm}`);
+function checksumHeader(algorithm: ChecksumAlgorithm): string {
+  return `x-amz-checksum-${algorithm}`;
 }
 
-function resolveChecksumHeaderName(algorithm: ChecksumAlgorithm): string {
-  return algorithm === "sha256" ? "x-amz-checksum-sha256" : "x-amz-checksum-crc32c";
+/**
+ * A Blob small enough to hold, read into memory once. Every attempt then
+ * re-sends, hashes and checksums the same bytes rather than reading the Blob
+ * again. A larger Blob is left as it is and signed `UNSIGNED-PAYLOAD`.
+ */
+async function materializeBody(
+  body: BodyInit | ReadableStream<Uint8Array> | null | undefined,
+): Promise<BodyInit | ReadableStream<Uint8Array> | null | undefined> {
+  if (isBlob(body) && body.size <= MAX_INLINE_CHECKSUM_BYTES) {
+    return new Uint8Array(await body.arrayBuffer());
+  }
+  return body;
 }
 
 async function computeSha256Base64(data: Uint8Array): Promise<string> {
@@ -1199,8 +1210,8 @@ function computeCrc32cBase64(data: Uint8Array): string {
 
 function crc32c(data: Uint8Array): number {
   let crc = CRC32C_INITIAL;
-  for (const byte of data) {
-    const tableIndex = (crc ^ byte) & 0xff;
+  for (let index = 0; index < data.length; index += 1) {
+    const tableIndex = (crc ^ data[index]!) & 0xff;
     crc = (crc >>> 8) ^ CRC32C_TABLE[tableIndex]!;
   }
   return (crc ^ CRC32C_INITIAL) >>> 0;
@@ -1418,11 +1429,8 @@ function shouldUseUnsignedPayload(
   if (!body) {
     return false;
   }
-  if (typeof body === "string") return false;
-  if (typeof Blob !== "undefined" && body instanceof Blob) return false;
-  if (typeof ArrayBuffer !== "undefined" && body instanceof ArrayBuffer) return false;
-  if (ArrayBuffer.isView(body)) return false;
-  return isPayloadStream(body as ReadableStream<Uint8Array>);
+  /* A Blob still a Blob by now is one too large to hold, and a stream cannot be hashed. */
+  return isBlob(body) || isPayloadStream(body as ReadableStream<Uint8Array>);
 }
 
 async function createError(response: Response): Promise<S3Error> {
@@ -1611,18 +1619,34 @@ function xmlRoot(text: string): string | undefined {
   return name?.slice(name.indexOf(":") + 1);
 }
 
-type CompletedPart = { partNumber: number; etag: string };
+type CompletedPart = { partNumber: number; etag: string; checksum?: string };
 
-function buildCompleteMultipartXml(parts: CompletedPart[]): string {
+const CHECKSUM_ELEMENTS: Record<ChecksumAlgorithm, string> = {
+  sha256: "ChecksumSHA256",
+  crc32c: "ChecksumCRC32C",
+};
+
+function buildCompleteMultipartXml(
+  parts: CompletedPart[],
+  algorithm: ChecksumConfig["algorithm"],
+): string {
   const body = parts
     .map((part) => {
       const etag = ensureQuotedEtag(part.etag);
-      return [
+      const lines = [
         "  <Part>",
         `    <PartNumber>${part.partNumber}</PartNumber>`,
         `    <ETag>${escapeXml(etag)}</ETag>`,
-        "  </Part>",
-      ].join("\n");
+      ];
+      if (part.checksum) {
+        if (algorithm === "none") {
+          throw new Error("A part checksum needs a checksum algorithm configured on the client.");
+        }
+        const element = CHECKSUM_ELEMENTS[algorithm];
+        lines.push(`    <${element}>${escapeXml(part.checksum)}</${element}>`);
+      }
+      lines.push("  </Part>");
+      return lines.join("\n");
     })
     .join("\n");
 
@@ -1644,6 +1668,7 @@ function normalizeCompletedParts(parts: CompleteMultipartParams["parts"]): Compl
   const normalized = parts.map((part) => ({
     partNumber: normalizePartNumber(part.partNumber),
     etag: part.etag,
+    checksum: part.checksum,
   }));
 
   normalized.sort((a, b) => a.partNumber - b.partNumber);

@@ -98,7 +98,13 @@ export interface RetryConfig {
 export interface ChecksumConfig {
   /** Hash algorithm used for checksum computation. `"none"` disables checksums. */
   algorithm: "none" | "sha256" | "crc32c";
-  /** When `true`, PUT requests will include a checksum header. */
+  /**
+   * The checksum is computed for every `put` and `uploadPart` body that can
+   * be hashed. A `ReadableStream`, or a Blob over 16 MiB, cannot be, and goes
+   * out without one. With `requireOnPut`, such a body is refused instead, and
+   * `initiateMultipart` declares the algorithm, since every part is then bound
+   * to carry it. A checksum header the caller sets is always kept as it is.
+   */
   requireOnPut?: boolean;
 }
 
@@ -296,6 +302,8 @@ export interface UploadPartParams extends BaseRequest {
 export interface UploadPartResult {
   /** ETag of this part as a quoted entity tag, required when completing the upload. */
   etag: string;
+  /** The part's checksum as the store reported it, when a checksum is configured. Pass it on to the completion. */
+  checksum?: string;
 }
 
 /** Parameters for completing a multipart upload. */
@@ -305,8 +313,11 @@ export interface CompleteMultipartParams
   key: string;
   /** Upload identifier returned by `multipartInit`. */
   uploadId: string;
-  /** Ordered list of uploaded parts with their part numbers and ETags. */
-  parts: Array<{ partNumber: number; etag: string }>;
+  /**
+   * The uploaded parts with their part numbers and ETags, and the checksum
+   * each one's upload reported, if any.
+   */
+  parts: Array<{ partNumber: number; etag: string; checksum?: string }>;
 }
 
 /** Result of completing a multipart upload. */
