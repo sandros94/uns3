@@ -1,3 +1,4 @@
+import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
@@ -12,10 +13,11 @@ export default defineConfig({
       exclude: ["dist/**", "test/**", "build.config.ts", "vitest.config.ts"],
     },
     /*
-     * Two suites, deliberately separate. `unit` is the fast one and needs
+     * Three suites, deliberately separate. `unit` is the fast one and needs
      * nothing but a process; `integration` starts a real S3-compatible store in
      * a container and skips itself when there is no container runtime to start
-     * it in.
+     * it in. `browser` runs a stream upload in real browser engines against a
+     * local echo server, and needs Playwright's browser binaries installed.
      */
     projects: [
       {
@@ -23,7 +25,7 @@ export default defineConfig({
         test: {
           name: "unit",
           include: ["test/**/*.test.ts"],
-          exclude: ["test/integration/**"],
+          exclude: ["test/integration/**", "test/browser/**"],
         },
       },
       {
@@ -34,6 +36,21 @@ export default defineConfig({
           /* Pulling and booting a store is minutes, not milliseconds. */
           testTimeout: 120_000,
           hookTimeout: 300_000,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "browser",
+          include: ["test/browser/**/*.test.ts"],
+          globalSetup: ["test/browser/_echo-server.ts"],
+          browser: {
+            enabled: true,
+            headless: true,
+            screenshotFailures: false,
+            provider: playwright(),
+            instances: [{ browser: "chromium" }, { browser: "firefox" }, { browser: "webkit" }],
+          },
         },
       },
     ],

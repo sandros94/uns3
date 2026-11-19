@@ -164,6 +164,8 @@ await client.put({
 
 A `ReadableStream` body is sent as it is produced. Two consequences are worth knowing: it is signed as `UNSIGNED-PAYLOAD` and cannot be checksummed (hashing it would mean buffering it, which is the thing a stream avoids), and it is never retried — the stream is consumed by the attempt that sent it, so there is nothing left to send a second time.
 
+A runtime whose `fetch` cannot stream a request body (Firefox among browsers) would send the stream's string form instead, so there a stream body is refused with a `TypeError` before anything is sent. Pass a `Blob` or a buffer instead.
+
 Most stores also want a length. With none, the body goes out as `Transfer-Encoding: chunked`, which AWS S3 and several S3-compatible stores answer with `411 MissingContentLength`. Declare it with `contentLength` whenever you know it:
 
 ```typescript

@@ -757,6 +757,11 @@ export class S3Client {
      */
     finalizeQuery(context.url);
     const streamedBody = hasBody(context.method) && isPayloadStream(context.body ?? null);
+    if (streamedBody && stringifiesStreamBodies()) {
+      throw new TypeError(
+        "This runtime cannot send a ReadableStream as a request body, and would send its string form instead. Pass a Blob, ArrayBuffer or Uint8Array.",
+      );
+    }
     const { maxAttempts } = this.retryConfig;
 
     for (let attempt = 1; ; attempt += 1) {
@@ -1424,6 +1429,28 @@ function withoutImplicitType(
   if (typeof body === "string") return textEncoder.encode(body);
   if (isBlob(body) && body.type) return body.slice(0, body.size, "");
   return body;
+}
+
+let stringifiesStreams: boolean | undefined;
+
+/**
+ * Whether `fetch` would send a `ReadableStream` body as its string form,
+ * detected once. A runtime that cannot take a stream as a body reads it as an
+ * ordinary object, so it goes out as `[object ReadableStream]` with a
+ * `text/plain` type, and a store accepts those bytes with a `200`. Firefox
+ * is one such runtime. One that takes the stream but cannot upload it fails
+ * the fetch loudly, which needs no guard.
+ */
+function stringifiesStreamBodies(): boolean {
+  if (stringifiesStreams === undefined) {
+    try {
+      const init = { method: "POST", body: new ReadableStream(), duplex: "half" };
+      stringifiesStreams = new Request("http://localhost/", init).headers.has("content-type");
+    } catch {
+      stringifiesStreams = false;
+    }
+  }
+  return stringifiesStreams;
 }
 
 /**

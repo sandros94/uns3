@@ -12,18 +12,20 @@ uns3 is a tiny, zero-dependency, runtime-agnostic S3 client that works across No
 - **Lint**: `pnpm lint` (`oxlint .` then `oxfmt --check .`)
 - **Lint fix**: `pnpm fmt` (automd + `oxlint --fix` + `oxfmt`)
 - **Type check**: `pnpm typecheck` (`tsc --noEmit`, TypeScript 7 native compiler)
-- **Test all**: `pnpm test` (both vitest projects)
+- **Test all**: `pnpm test` (`unit` + `integration`)
 - **Unit only**: `pnpm test:unit` (fast; no container runtime needed)
 - **Integration only**: `pnpm test:integration` (real stores in containers)
+- **Browser only**: `pnpm test:browser` (after `pnpm exec playwright install chromium firefox webkit`)
 - **Run a single test**: `pnpm vitest run test/core/signer.test.ts`
 - **Run tests in watch**: `pnpm vitest`
 
 ## Tests
 
-Two vitest projects, declared in `vitest.config.ts`:
+Three vitest projects, declared in `vitest.config.ts`:
 
-- **`unit`** — everything under `test/` except `test/integration/`. Requests are answered by a `fetch` mock, so the suite needs nothing but a process. Keep it that way.
+- **`unit`** — everything under `test/` except `test/integration/` and `test/browser/`. Requests are answered by a `fetch` mock, so the suite needs nothing but a process. Keep it that way.
 - **`integration`** — `test/integration/`, the same battery run against real S3-compatible stores started as containers with testcontainers. Selected with `UNS3_TEST_STORES` (comma-separated), and skipped outright when there is no container runtime, so a machine without docker still gets a green `pnpm test`. Setting `UNS3_TEST_ENDPOINT` (with `UNS3_TEST_BUCKET`, `UNS3_TEST_ACCESS_KEY_ID`, `UNS3_TEST_SECRET_ACCESS_KEY`, optional `UNS3_TEST_REGION`, `UNS3_TEST_SESSION_TOKEN`, `UNS3_TEST_BUCKET_STYLE`) runs the battery against an existing store instead of the containers. These may live in a local `.env`. The leg deletes what it wrote when it ends.
+- **`browser`** — `test/browser/`, run in Chromium, Firefox and WebKit through vitest browser mode with Playwright, against a local echo server started by its globalSetup. Opt-in: `pnpm test` leaves it out because it needs Playwright's browser binaries.
 
 Releases go through `uppt` (`.github/workflows/release.yml`): a release PR on push to main, a tag and GitHub Release on merge, then a `pnpm pack` and an OIDC trusted publish to npm from the `npm` environment. There is no local release script — do not add one.
 
