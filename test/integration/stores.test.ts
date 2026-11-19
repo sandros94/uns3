@@ -347,6 +347,7 @@ describe.skipIf(!canRun(SELECTED)).each(SELECTED)("$name", (spec: StoreSpec) => 
       const error = await rejection(() => client.head({ key }));
       expect(error).toBeInstanceOf(S3Error);
       expect(error.status).toBe(404);
+      expect(error.code).toBe("NotFound");
     });
   });
 
@@ -417,10 +418,10 @@ describe.skipIf(!canRun(SELECTED)).each(SELECTED)("$name", (spec: StoreSpec) => 
       const error = await rejection(() => client.head({ key, ifMatch: '"deadbeef"' }));
       expect(error.status).toBe(412);
       /*
-       * No `code`: a HEAD has no body to carry the `<Error><Code>` element, so
-       * the status is the whole of what either store manages to say.
+       * A HEAD has no body to carry the `<Error><Code>` element, so the code is
+       * the one the status stands for.
        */
-      expect(error.code).toBeUndefined();
+      expect(error.code).toBe("PreconditionFailed");
     });
 
     it("refuses a PUT with if-none-match:* over an existing key", async () => {

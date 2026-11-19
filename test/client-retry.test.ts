@@ -198,7 +198,7 @@ describe("deadlines", () => {
     });
 
     await expect(client.head({ bucket: BUCKET, key: "a.txt" })).rejects.toMatchObject({
-      name: "TimeoutError",
+      cause: { name: "TimeoutError" },
     });
     expect(requests).toHaveLength(2);
   });

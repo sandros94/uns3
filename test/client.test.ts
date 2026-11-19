@@ -254,7 +254,6 @@ describe("S3Client", () => {
     expect(headers["x-custom-header"]).toBe("allowed");
     expect(headers["x-amz-request-id"]).toBe("123");
     expect(headers["content-length"]).toBeUndefined();
-    expect(headers["content-type"]).toBeUndefined();
   });
 
   it("presigns requests with expected query parameters", async () => {

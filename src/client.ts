@@ -835,7 +835,7 @@ export class S3Client {
       context.signal?.throwIfAborted();
 
       if (!this.shouldRetry(streamedBody, response, failure, attempt, maxAttempts)) {
-        throw failure;
+        throw failure instanceof S3Error ? failure : transportError(context, attempt, failure);
       }
 
       let delayMs = this.computeBackoffDelay(attempt);
@@ -1454,7 +1454,8 @@ function buildError(response: Response, text: string | undefined): S3Error {
   let resource: string | undefined;
   let region: string | undefined;
 
-  if (text) {
+  /* Only an S3 error document is read: an HTML page's `<code>` is not an S3 code. */
+  if (text && xmlRoot(text) === "Error") {
     const parsed = parseErrorXml(text);
     if (parsed.message) message = parsed.message;
     if (parsed.code) code = parsed.code;
@@ -1463,6 +1464,38 @@ function buildError(response: Response, text: string | undefined): S3Error {
   }
 
   return errorFrom(response, text, { message, code, resource, region });
+}
+
+/**
+ * The S3 code a status stands for, for an error that came without a document
+ * to name it — every `HEAD` among them.
+ */
+const STATUS_CODES: Record<number, string> = {
+  301: "PermanentRedirect",
+  304: "NotModified",
+  307: "TemporaryRedirect",
+  400: "BadRequest",
+  403: "Forbidden",
+  404: "NotFound",
+  405: "MethodNotAllowed",
+  409: "Conflict",
+  412: "PreconditionFailed",
+  416: "InvalidRange",
+  500: "InternalError",
+  501: "NotImplemented",
+  503: "ServiceUnavailable",
+};
+
+/**
+ * The error for a request that never got a response, naming the request
+ * without its query, which can carry credentials, and keeping what failed it
+ * as the cause.
+ */
+function transportError(context: PerformContext, attempts: number, cause: unknown): Error {
+  const url = new URL(context.url);
+  url.search = "";
+  const tries = attempts === 1 ? "1 attempt" : `${attempts} attempts`;
+  return new Error(`${context.method} ${url.href} failed after ${tries}.`, { cause });
 }
 
 /**
@@ -1479,7 +1512,8 @@ function errorFrom(
   text: string | undefined,
   init: { message: string; code?: string; resource?: string; region?: string; retriable?: boolean },
 ): S3Error {
-  const { message, code, resource, region } = init;
+  const { message, resource, region } = init;
+  const code = init.code ?? STATUS_CODES[response.status];
   const bucketRegion = response.headers.get("x-amz-bucket-region") ?? undefined;
   const retryAfter = parseRetryAfter(response.headers);
   const retriable = init.retriable ?? determineErrorRetriable(response.status, code);
@@ -1738,7 +1772,7 @@ function parseListObjectsV2(xml: string): ListObjectsV2Response {
  * because an attribute has to be separated by whitespace.
  */
 function extractTag(section: string, tag: string): string | undefined {
-  const regex = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}\\s*>`, "i");
+  const regex = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}\\s*>`);
   const match = section.match(regex);
   const value = match?.[1];
   return typeof value === "string" ? decodeXmlText(value) : undefined;

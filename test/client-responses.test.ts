@@ -125,3 +125,43 @@ describe("redirects", () => {
     });
   });
 });
+
+describe("error reports", () => {
+  it("names the error of a response with no body by its status", async () => {
+    const { client } = clientAnswering(() => new Response(null, { status: 404 }));
+
+    await expect(client.head({ bucket: BUCKET, key: "a.txt" })).rejects.toMatchObject({
+      status: 404,
+      code: "NotFound",
+    });
+  });
+
+  it("reads codes from S3 error documents only", async () => {
+    const { client } = clientAnswering(
+      () =>
+        new Response("<html><code>8f2a-FRA</code><message>blocked</message></html>", {
+          status: 403,
+          headers: { "content-type": "text/html" },
+        }),
+    );
+
+    const error = await client.get({ bucket: BUCKET, key: "a.txt" }).catch((e: unknown) => e);
+
+    expect(error).toMatchObject({ status: 403, code: "Forbidden" });
+    expect((error as S3Error).message).not.toBe("blocked");
+    expect((error as S3Error).cause).toMatchObject({ headers: { "content-type": "text/html" } });
+  });
+
+  it("says which request failed in transit, keeping what failed it", async () => {
+    const failure = new TypeError("fetch failed");
+    const { client } = clientAnswering(() => Promise.reject(failure));
+
+    const error = await client.get({ bucket: BUCKET, key: "a.txt" }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain(
+      "GET https://my-bucket.s3.us-east-1.amazonaws.com/a.txt",
+    );
+    expect((error as Error).cause).toBe(failure);
+  });
+});
