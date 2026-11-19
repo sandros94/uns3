@@ -20,8 +20,6 @@
     "./utils": "./dist/utils.mjs",
     ".": {
       "types": "./dist/index.d.mts",
-      "core": "./dist/core.mjs",
-      "utils": "./dist/utils.mjs",
       "default": "./dist/index.mjs"
     }
   },
