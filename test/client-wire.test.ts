@@ -15,14 +15,8 @@ import { createHash, createHmac } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { type Credentials, S3Client } from "../src/index.ts";
-
-const credentials: Credentials = {
-  accessKeyId: "AKIDEXAMPLE",
-  secretAccessKey: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
-};
-
-const BUCKET = "my-bucket";
+import { S3Client } from "../src/index.ts";
+import { BUCKET, clientAnswering, credentials } from "./_client.ts";
 
 const LIST_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult>
@@ -347,27 +341,6 @@ function streamOf(text: string): ReadableStream<Uint8Array> {
       controller.close();
     },
   });
-}
-
-/** A client whose every request is answered by `responder`, and kept. */
-function clientAnswering(
-  responder: (request: Request) => Response | Promise<Response>,
-  config: Partial<ConstructorParameters<typeof S3Client>[0]> = {},
-): { client: S3Client; requests: Request[] } {
-  const requests: Request[] = [];
-  const client = new S3Client({
-    region: "us-east-1",
-    endpoint: "https://s3.us-east-1.amazonaws.com",
-    credentials,
-    retry: { maxAttempts: 1, baseDelayMs: 0 },
-    ...config,
-    fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const request = input instanceof Request ? input : new Request(input, init);
-      requests.push(request);
-      return await responder(request);
-    }) as typeof fetch,
-  });
-  return { client, requests };
 }
 
 /**
