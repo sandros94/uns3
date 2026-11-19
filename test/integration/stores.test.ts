@@ -431,13 +431,8 @@ describe.skipIf(!canRun(SELECTED)).each(SELECTED)("$name", (spec: StoreSpec) => 
       expect(first.status).toBe(200);
       await discard(first);
 
-      /*
-       * 412 is a *result* of `put`, not a failure of it — "somebody else got
-       * there first" is the answer this call went looking for.
-       */
-      const second = await client.put({ key, body: "second", ifNoneMatch: "*" });
+      const second = await rejection(() => client.put({ key, body: "second", ifNoneMatch: "*" }));
       expect(second.status).toBe(412);
-      await discard(second);
 
       const read = await client.get({ key });
       await expect(read.text()).resolves.toBe("first");
@@ -452,9 +447,8 @@ describe.skipIf(!canRun(SELECTED)).each(SELECTED)("$name", (spec: StoreSpec) => 
       expect(matched.status).toBe(200);
       await discard(matched);
 
-      const stale = await client.put({ key, body: "third", ifMatch: etag });
+      const stale = await rejection(() => client.put({ key, body: "third", ifMatch: etag }));
       expect(stale.status).toBe(412);
-      await discard(stale);
 
       const read = await client.get({ key });
       await expect(read.text()).resolves.toBe("second");
@@ -514,15 +508,11 @@ describe.skipIf(!canRun(SELECTED)).each(SELECTED)("$name", (spec: StoreSpec) => 
       expect(Date.parse(entry?.lastModified ?? "")).not.toBeNaN();
 
       /*
-       * An equality, and it took a fix to earn. SeaweedFS XML-escapes the quotes
-       * around `<ETag>` as the NUMERIC entity `&#34;`, which `decodeXml` did not
-       * know: the entity survived parsing, `stripQuotes` never saw a leading
-       * quote, and a listed etag read `&#34;5eb6…&#34;` where the HEAD said
-       * `5eb6…`. RustFS sends the hex bare and always came back clean, which is
-       * exactly why one store is not enough. The listed etag is now the object's
-       * etag, on both.
+       * An equality across two spellings. SeaweedFS escapes the quotes around
+       * `<ETag>` as the numeric entity `&#34;`, and RustFS sends the hex bare.
+       * Either way the listed etag is the quoted entity tag a HEAD reports.
        */
-      const etag = (await etagOf(client, `${prefix}sized.txt`)).replaceAll('"', "");
+      const etag = await etagOf(client, `${prefix}sized.txt`);
       expect(entry?.etag).toBe(etag);
     });
 
@@ -695,8 +685,8 @@ describe.skipIf(!canRun(SELECTED)).each(SELECTED)("$name", (spec: StoreSpec) => 
 
       const partOne = await client.uploadPart({ key, uploadId, partNumber: 1, body: first });
       const partTwo = await client.uploadPart({ key, uploadId, partNumber: 2, body: second });
-      expect(partOne.etag).toMatch(/^[\da-f]{32}$/);
-      expect(partTwo.etag).toMatch(/^[\da-f]{32}$/);
+      expect(partOne.etag).toMatch(/^"[\da-f]{32}"$/);
+      expect(partTwo.etag).toMatch(/^"[\da-f]{32}"$/);
 
       const completed = await client.completeMultipart({
         key,

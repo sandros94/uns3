@@ -283,7 +283,7 @@ export interface UploadPartParams extends BaseRequest {
 
 /** Result of a single part upload. */
 export interface UploadPartResult {
-  /** ETag returned by S3 for this part, required when completing the upload. */
+  /** ETag of this part as a quoted entity tag, required when completing the upload. */
   etag: string;
 }
 
@@ -300,7 +300,7 @@ export interface CompleteMultipartParams
 
 /** Result of completing a multipart upload. */
 export interface CompleteMultipartResult {
-  /** ETag of the assembled object, exactly as the store reported it. */
+  /** ETag of the assembled object as a quoted entity tag. */
   etag: string;
   /** URL of the assembled object, when the store reports one. */
   location?: string;
@@ -334,7 +334,7 @@ export interface ListObjectsV2Response {
     key: string;
     /** Object size in bytes. */
     size: number;
-    /** Object ETag, if available. */
+    /** Object ETag as a quoted entity tag, the form a HEAD reports, if available. */
     etag: string | undefined;
     /** ISO 8601 timestamp of the last modification. */
     lastModified: string;

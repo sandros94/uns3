@@ -178,7 +178,7 @@ describe("request bytes", () => {
         body: streamOf("part payload"),
       });
 
-      expect(result.etag).toBe("part-etag");
+      expect(result.etag).toBe('"part-etag"');
       expect(requests).toHaveLength(1);
       await expect(requests[0]!.text()).resolves.toBe("part payload");
     });

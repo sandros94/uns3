@@ -165,3 +165,69 @@ describe("error reports", () => {
     expect((error as Error).cause).toBe(failure);
   });
 });
+
+/*
+ * An ETag is an entity tag, quotes included (RFC 9110, section 8.8.3), and
+ * every method hands it back in that one form, whichever way the store wrote
+ * it. A listed or uploaded etag is the one a HEAD reports, and goes straight
+ * back into `ifMatch` or a completion.
+ */
+describe("etags and preconditions", () => {
+  it("hands every etag back as a quoted entity tag", async () => {
+    const { client } = clientAnswering((request) =>
+      request.method === "PUT"
+        ? new Response(null, { status: 200, headers: { etag: '"part"' } })
+        : new Response(
+            "<ListBucketResult><Contents><Key>a</Key><Size>1</Size><LastModified>2024-01-01T00:00:00.000Z</LastModified><ETag>listed</ETag></Contents></ListBucketResult>",
+          ),
+    );
+
+    const part = await client.uploadPart({
+      bucket: BUCKET,
+      key: "a",
+      uploadId: "u",
+      partNumber: 1,
+      body: "x",
+    });
+    const listed = await client.list({ bucket: BUCKET });
+
+    expect(part.etag).toBe('"part"');
+    expect(listed.contents[0]!.etag).toBe('"listed"');
+  });
+
+  it("keeps a weak etag whole in a completion", async () => {
+    const { client, requests } = clientAnswering(
+      () =>
+        new Response(
+          "<CompleteMultipartUploadResult><ETag>&quot;e&quot;</ETag></CompleteMultipartUploadResult>",
+        ),
+    );
+
+    await client.completeMultipart({ ...complete, parts: [{ partNumber: 1, etag: 'W/"a"' }] });
+
+    await expect(requests[0]!.text()).resolves.toContain('<ETag>W/"a"</ETag>');
+  });
+
+  it("raises a failed precondition on put rather than resolving it", async () => {
+    const { client } = clientAnswering(() => xmlError(412, "PreconditionFailed"));
+
+    await expect(
+      client.put({ bucket: BUCKET, key: "a.txt", body: "x", ifNoneMatch: "*" }),
+    ).rejects.toMatchObject({ status: 412, code: "PreconditionFailed" });
+  });
+
+  it("retries a conditional write that lost a race", async () => {
+    let attempts = 0;
+    const { client, requests } = clientAnswering(
+      () =>
+        ++attempts === 1
+          ? xmlError(409, "ConditionalRequestConflict")
+          : new Response(null, { status: 200 }),
+      { retry: { maxAttempts: 2, baseDelayMs: 0 } },
+    );
+
+    await client.put({ bucket: BUCKET, key: "a.txt", body: "x", ifNoneMatch: "*" });
+
+    expect(requests).toHaveLength(2);
+  });
+});

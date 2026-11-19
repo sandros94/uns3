@@ -180,24 +180,26 @@ The `put()` method supports optional conditional headers (`ifMatch`, `ifNoneMatc
 
 ```typescript
 // Only overwrite if the current ETag matches
-const response = await client.put({
-  key: "document.txt",
-  body: "Updated content",
-  ifMatch: '"abc123"', // Current object's ETag
-});
-
-if (response.status === 412) {
-  console.log("Precondition failed - object was modified by someone else");
-} else {
-  console.log("Upload successful");
+try {
+  await client.put({
+    key: "document.txt",
+    body: "Updated content",
+    ifMatch: '"abc123"', // Current object's ETag
+  });
+} catch (error) {
+  if (error instanceof S3Error && error.status === 412) {
+    console.log("Precondition failed - object was modified by someone else");
+  } else {
+    throw error;
+  }
 }
 ```
 
-When conditional headers are used and the condition fails, S3 returns `412 Precondition Failed` (not `304 Not Modified` like GET/HEAD operations).
+When a condition fails, the `412 Precondition Failed` is raised as an `S3Error`. ETags are always handed back as quoted entity tags (`"abc123"`), whichever method reported them, so a listed or uploaded one can be passed to `ifMatch` as it is.
 
 #### `del()`
 
-Deletes an object from a bucket. Note: DELETE operations do not support conditional headers.
+Deletes an object from a bucket.
 
 ```typescript
 await client.del({ key: "my-file-to-delete.txt" });

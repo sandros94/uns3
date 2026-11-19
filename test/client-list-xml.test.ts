@@ -35,7 +35,7 @@ const credentials: Credentials = {
 describe("entity decoding", () => {
   it("decodes decimal character references", async () => {
     const listed = await listing(contents({ key: "quoted.txt", etag: "&#34;abc123&#34;" }));
-    expect(listed.contents[0]?.etag).toBe("abc123");
+    expect(listed.contents[0]?.etag).toBe('"abc123"');
   });
 
   it("decodes hex character references in either case", async () => {
@@ -46,7 +46,7 @@ describe("entity decoding", () => {
     expect(upper.contents[0]?.key).toBe("a/b.txt");
 
     const quoted = await listing(contents({ key: "q.txt", etag: "&#x22;abc123&#x22;" }));
-    expect(quoted.contents[0]?.etag).toBe("abc123");
+    expect(quoted.contents[0]?.etag).toBe('"abc123"');
   });
 
   it("decodes the named entities XML actually defines", async () => {
@@ -135,7 +135,7 @@ describe("document shape", () => {
       {
         key: "attributed.txt",
         size: 5,
-        etag: "abc123",
+        etag: '"abc123"',
         lastModified: "2023-01-01T12:00:00.000Z",
         storageClass: "STANDARD",
       },

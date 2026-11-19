@@ -181,9 +181,10 @@ export class S3Client {
    *
    * Supports optional conditional headers (`ifMatch`, `ifNoneMatch`) for conditional
    * overwrites. Note that not all S3-compatible providers support these headers.
-   * When conditions fail, S3 returns `412 Precondition Failed`.
+   * When a condition fails, the `412 Precondition Failed` is raised as an
+   * {@link S3Error}.
    *
-   * Accepts `200` and `412` by default. Set `expectedStatus` to replace that list
+   * Accepts `200` by default. Set `expectedStatus` to replace that list
    * entirely — stores that answer `201` to a PUT need it.
    *
    * `contentLength` declares the body's size, and is what makes a streamed
@@ -226,7 +227,7 @@ export class S3Client {
       cacheControl: params.cacheControl,
       contentDisposition: params.contentDisposition,
       contentEncoding: params.contentEncoding,
-      expectedStatus: params.expectedStatus ?? [200, 412],
+      expectedStatus: params.expectedStatus ?? 200,
     });
   }
 
@@ -486,15 +487,13 @@ export class S3Client {
     discardBody(response);
 
     if (!etagHeader) {
-      throw new Error("ETag header missing from UploadPart response.");
+      throw errorFrom(response, undefined, {
+        message: "The UploadPart response carries no ETag.",
+        retriable: false,
+      });
     }
 
-    const etag = stripQuotes(etagHeader);
-    if (!etag) {
-      throw new Error("ETag header was empty in UploadPart response.");
-    }
-
-    return { etag };
+    return { etag: ensureQuotedEtag(etagHeader) };
   }
 
   /**
@@ -563,7 +562,8 @@ export class S3Client {
       "CompleteMultipartUploadResult",
       (text) => {
         location = extractTag(text, "Location") || undefined;
-        return extractTag(text, "ETag") || undefined;
+        const etag = extractTag(text, "ETag");
+        return etag ? ensureQuotedEtag(etag) : undefined;
       },
     );
 
@@ -607,7 +607,6 @@ export class S3Client {
       headers,
       bucket,
       key,
-      // TODO: study if this should also support 412
       expectedStatus: params.expectedStatus ?? [200, 202, 204],
       signal: params.signal,
       timeoutMs: this.deadline(params, false),
@@ -1104,6 +1103,7 @@ const RETRIABLE_ERROR_CODES = new Set<string>([
   "SERVICEUNAVAILABLEEXCEPTION",
   "HTTP503",
   "GATEWAYTIMEOUT",
+  "CONDITIONALREQUESTCONFLICT",
 ]);
 
 async function normalizeBodyForChecksum(
@@ -1690,12 +1690,13 @@ function validateUploadId(uploadId: string): string {
   return trimmed;
 }
 
+/** An entity tag as RFC 9110 spells it: quoted, and weak ones left whole. */
 function ensureQuotedEtag(etag: string): string {
   const trimmed = etag.trim();
   if (!trimmed) {
     throw new Error("ETag cannot be empty.");
   }
-  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+  if (/^(?:W\/)?".*"$/.test(trimmed)) {
     return trimmed;
   }
   return `"${trimmed}"`;
@@ -1726,7 +1727,7 @@ function parseListObjectsV2(xml: string): ListObjectsV2Response {
     contents.push({
       key,
       size: Number.parseInt(size, 10),
-      etag: etag ? stripQuotes(etag) : undefined,
+      etag: etag ? ensureQuotedEtag(etag) : undefined,
       lastModified,
       storageClass,
     });
@@ -1790,13 +1791,6 @@ const CDATA_SECTION = /^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/;
 function decodeXmlText(raw: string): string {
   const cdata = CDATA_SECTION.exec(raw);
   return cdata ? cdata[1]! : decodeXml(raw);
-}
-
-function stripQuotes(value: string): string {
-  if (value.startsWith('"') && value.endsWith('"')) {
-    return value.slice(1, -1);
-  }
-  return value;
 }
 
 const XML_ENTITIES: Record<string, string> = {

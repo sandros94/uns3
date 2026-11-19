@@ -178,7 +178,7 @@ describe("S3Client", () => {
     expect(result.contents[0]).toMatchObject({
       key: "test.txt",
       size: 5,
-      etag: "abc123",
+      etag: '"abc123"',
       storageClass: "STANDARD",
     });
     expect(result.commonPrefixes).toEqual(["photos/"]);
@@ -545,7 +545,7 @@ describe("S3Client", () => {
     expect(await request.clone().text()).toBe("");
   });
 
-  it("uploads parts and normalizes returned ETags", async () => {
+  it("uploads parts and returns their ETags", async () => {
     let captured: Request | undefined;
     const fetchMock = createFetchMock(async (request) => {
       captured = request;
@@ -572,7 +572,7 @@ describe("S3Client", () => {
       contentLength: payload.byteLength,
     });
 
-    expect(result.etag).toBe("part-etag");
+    expect(result.etag).toBe('"part-etag"');
     expect(captured).toBeDefined();
     const request = captured!;
     expect(request.method).toBe("PUT");

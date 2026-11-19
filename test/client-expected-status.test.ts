@@ -116,13 +116,6 @@ describe("expectedStatus defaults", () => {
       async () => await head304.client.head({ bucket: BUCKET, key: KEY, ifNoneMatch: '"e"' }),
     ]);
 
-    const put412 = clientReturning(412);
-    cases.push([
-      "put 412",
-      412,
-      async () => await put412.client.put({ bucket: BUCKET, key: KEY, body: "x", ifMatch: '"e"' }),
-    ]);
-
     const del204 = clientReturning(204);
     cases.push(["del 204", 204, async () => await del204.client.del({ bucket: BUCKET, key: KEY })]);
 
@@ -235,7 +228,7 @@ describe("expectedStatus overrides", () => {
       expectedStatus: [200, 201],
     });
 
-    expect(result.etag).toBe("part-etag");
+    expect(result.etag).toBe('"part-etag"');
   });
 
   it("is honored by completeMultipart", async () => {
