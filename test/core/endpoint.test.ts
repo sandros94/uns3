@@ -61,7 +61,12 @@ describe("endpoint builder", () => {
     expect(url.pathname).toBe("/my-bucket/photos/img.jpg");
   });
 
-  it("should handle keys with leading slashes", () => {
+  /*
+   * A leading slash is part of the key, like any other byte. Stripping it wrote
+   * `/foo` to `foo`, and turned the key `/` into a request for the bucket
+   * itself: a `del` became DeleteBucket and a `put` became CreateBucket.
+   */
+  it("keeps a leading slash as part of the key", () => {
     const url = buildRequestUrl({
       endpoint: "https://s3.amazonaws.com",
       bucketStyle: "virtual",
@@ -70,7 +75,25 @@ describe("endpoint builder", () => {
     });
 
     expect(url.hostname).toBe("my-bucket.s3.amazonaws.com");
-    expect(url.pathname).toBe("/leading/slash.txt");
+    expect(url.pathname).toBe("//leading/slash.txt");
+  });
+
+  it("never turns a key into a bucket request", () => {
+    const virtual = buildRequestUrl({
+      endpoint: "https://s3.amazonaws.com",
+      bucketStyle: "virtual",
+      bucket: "my-bucket",
+      key: "/",
+    });
+    const path = buildRequestUrl({
+      endpoint: "https://s3.amazonaws.com",
+      bucketStyle: "path",
+      bucket: "my-bucket",
+      key: "/",
+    });
+
+    expect(virtual.pathname).toBe("//");
+    expect(path.pathname).toBe("/my-bucket//");
   });
 
   /*
@@ -95,7 +118,6 @@ describe("endpoint builder", () => {
     expect(() => encodeS3Key("a/./b")).toThrow(/dot segment/i);
     expect(() => encodeS3Key("..")).toThrow(/dot segment/i);
     expect(() => encodeS3Key(".")).toThrow(/dot segment/i);
-    /* The leading slash is stripped first, so this is `../a` by the time it is judged. */
     expect(() => encodeS3Key("/../a")).toThrow(/dot segment/i);
     expect(() => encodeS3Key("a/..")).toThrow(/dot segment/i);
 

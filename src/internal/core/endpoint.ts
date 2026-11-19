@@ -44,7 +44,8 @@ export function buildRequestUrl<T extends BucketStyle>(input: EndpointInput<T>):
 
 /**
  * Encodes an S3 object key using RFC 3986 rules while preserving path
- * separators and significant empty segments (e.g. trailing slashes).
+ * separators and every empty segment, leading, inner and trailing alike. A key
+ * is sent exactly as written: `/foo` and `foo` are two different objects.
  *
  * Throws on a key containing a `.` or `..` path segment. S3's key space is
  * flat, so `dir/../evil.txt` is a name; a URL's path is not, and every WHATWG
@@ -64,12 +65,11 @@ export function buildRequestUrl<T extends BucketStyle>(input: EndpointInput<T>):
 export function encodeS3Key(key: string): string {
   if (!key) return "";
   return key
-    .replace(/^\//, "") // Remove leading slash
     .split("/")
     .map((segment) => {
       if (DOT_SEGMENT.test(segment)) {
         throw new Error(
-          `Object key ${JSON.stringify(key)} contains a "${segment}" dot segment, which URL parsing removes instead of sending. Rename the key, or percent-encode the dots yourself if the store expects them literally.`,
+          `Object key ${JSON.stringify(key)} contains a "${segment}" dot segment, which URL parsing removes instead of sending. Rename the key: no encoding of a dot segment survives a URL.`,
         );
       }
       return uriEncode(segment);
