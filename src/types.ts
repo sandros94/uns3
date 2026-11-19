@@ -333,6 +333,8 @@ export interface ListObjectsV2Params extends BaseRequest {
   delimiter?: string;
   /** Token from a previous truncated response to fetch the next page. */
   continuationToken?: string;
+  /** Only include keys that sort after this one. */
+  startAfter?: string;
   /** Maximum number of keys to return per request. */
   maxKeys?: number;
 }
@@ -359,8 +361,9 @@ export interface ListObjectsV2Response {
   /** Pass this value as `continuationToken` to fetch the next page of results. */
   nextContinuationToken?: string;
   /**
-   * The `NextMarker` of a store that answered V1-style pagination, present only
-   * when it sent one — several S3-compatible stores ignore `list-type=2` and
+   * Where a store that answered V1-style pagination resumes: its `NextMarker`,
+   * or the last name listed when a truncated page sent none (V1 sends one only
+   * with a delimiter). Several S3-compatible stores ignore `list-type=2` and
    * page this way, in which case `isTruncated` is `true` and
    * `nextContinuationToken` is absent.
    *

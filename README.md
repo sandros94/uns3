@@ -232,10 +232,16 @@ Pagination follows `nextContinuationToken` for as long as `isTruncated` is `true
 
 ```typescript
 let token: string | undefined;
+let marker: string | undefined;
 do {
-  const page = await client.list({ prefix: "documents/", continuationToken: token });
+  const page = await client.list({
+    prefix: "documents/",
+    continuationToken: token,
+    query: marker ? { marker } : undefined,
+  });
   token = page.isTruncated ? page.nextContinuationToken : undefined;
-} while (token);
+  marker = page.isTruncated && !token ? page.nextMarker : undefined;
+} while (token || marker);
 ```
 
 #### `getSignedUrl()`

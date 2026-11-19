@@ -550,6 +550,18 @@ describe.skipIf(!canRun(SELECTED)).each(SELECTED)("$name", (spec: StoreSpec) => 
       }
     });
 
+    it("lists the same keys when asked to url-encode them", async () => {
+      const prefix = randomPrefix();
+      const names = ["a b.txt", "c+d.txt", "e%f.txt", "g&h.txt"];
+      for (const name of names) await seed(client, `${prefix}${name}`, name, "text/plain");
+
+      const listed = await client.list({ prefix, query: { "encoding-type": "url" } });
+
+      expect(listed.contents.map((entry) => entry.key)).toEqual(
+        [...names].sort().map((name) => `${prefix}${name}`),
+      );
+    });
+
     /*
      * A newline is a legal byte in an S3 key and an awkward one everywhere else:
      * it travels as `%0A`, comes back inside the XML as a raw line break, and a

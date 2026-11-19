@@ -175,6 +175,53 @@ describe("document shape", () => {
     /* CDATA content is literal: no entity in there is an entity. */
     expect(listed.contents[0]?.key).toBe("raw & literal <key>.txt");
   });
+
+  it("reads a closing tag inside CDATA as text", async () => {
+    const listed = await listing(contents({ key: "<![CDATA[a</Key>b]]>" }));
+    expect(listed.contents[0]?.key).toBe("a</Key>b");
+  });
+
+  it("decodes text around a CDATA section and leaves the section literal", async () => {
+    const listed = await listing(contents({ key: "x&amp;<![CDATA[&amp;]]>y" }));
+    expect(listed.contents[0]?.key).toBe("x&&amp;y");
+  });
+
+  it("reads a self-closing element as empty, never as an open one", async () => {
+    const listed = await listing(`<ListBucketResult>
+  <IsTruncated>false</IsTruncated>
+  <Contents>
+    <Key>a</Key>
+    <StorageClass xsi:nil="true" />
+    <LastModified>2023-01-01T12:00:00.000Z</LastModified>
+    <Size>1</Size>
+    <RestoreStatus><StorageClass>GLACIER</StorageClass></RestoreStatus>
+  </Contents>
+</ListBucketResult>`);
+
+    expect(listed.contents[0]?.storageClass).toBeUndefined();
+  });
+
+  it("refuses an entry it cannot read rather than dropping it", async () => {
+    await expect(
+      listing(`<ListBucketResult>
+  <IsTruncated>false</IsTruncated>
+  <Contents><Key>a</Key><Size>1</Size></Contents>
+</ListBucketResult>`),
+    ).rejects.toThrow(/LastModified/);
+    await expect(listing(contents({ key: "a", size: "lots" }))).rejects.toThrow(/Size/);
+  });
+
+  it("decodes the keys of a url-encoded listing", async () => {
+    const listed = await listing(`<ListBucketResult>
+  <EncodingType>url</EncodingType>
+  <IsTruncated>false</IsTruncated>
+  <Contents><Key>my+file%2B1%0A.txt</Key><LastModified>2023-01-01T12:00:00.000Z</LastModified><Size>1</Size></Contents>
+  <CommonPrefixes><Prefix>dir+one%2F</Prefix></CommonPrefixes>
+</ListBucketResult>`);
+
+    expect(listed.contents[0]?.key).toBe("my file+1\n.txt");
+    expect(listed.commonPrefixes).toEqual(["dir one/"]);
+  });
 });
 
 /*
@@ -224,6 +271,35 @@ describe("pagination tokens", () => {
     expect(listed.nextContinuationToken).toBeUndefined();
   });
 
+  it("resumes a truncated V1 listing after its last key when it names no marker", async () => {
+    const listed = await listing(`<ListBucketResult>
+  <IsTruncated>true</IsTruncated>
+  <Contents><Key>a.txt</Key><LastModified>2023-01-01T12:00:00.000Z</LastModified><Size>1</Size></Contents>
+  <Contents><Key>b.txt</Key><LastModified>2023-01-01T12:00:00.000Z</LastModified><Size>1</Size></Contents>
+</ListBucketResult>`);
+
+    expect(listed.nextMarker).toBe("b.txt");
+  });
+
+  it("sends each list parameter once, the typed one winning", async () => {
+    const requests: Request[] = [];
+    const client = clientAnswering((request) => {
+      requests.push(request);
+      return new Response("<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>");
+    });
+
+    await client.list({
+      bucket: "my-bucket",
+      prefix: "a",
+      maxKeys: 10,
+      query: { "prefix": "z", "max-keys": 5 },
+    });
+
+    const query = new URL(requests[0]!.url).searchParams;
+    expect(query.getAll("prefix")).toEqual(["a"]);
+    expect(query.getAll("max-keys")).toEqual(["10"]);
+  });
+
   it("decodes a token like any other text", async () => {
     const listed = await listing(`<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult>
@@ -236,7 +312,7 @@ describe("pagination tokens", () => {
 });
 
 /** One `<Contents>` entry, with only the fields a test cares about spelled out. */
-function contents(entry: { key: string; etag?: string; size?: number }): string {
+function contents(entry: { key: string; etag?: string; size?: number | string }): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult>
   <IsTruncated>false</IsTruncated>

@@ -257,10 +257,10 @@ export class S3Client {
    * `nextMarker` and no token; that value goes back as `query: { marker }`, not
    * as `continuationToken` — see {@link ListObjectsV2Response.nextMarker}.
    *
-   * The request never asks for `encoding-type=url`, so keys come back as the
-   * store wrote them and are only XML-decoded. A caller who adds
-   * `query: { "encoding-type": "url" }` by hand gets percent-encoded keys and
-   * owns the decoding.
+   * Every entry the store lists is returned, and a listing that cannot be read
+   * is raised as an {@link S3Error} rather than trimmed. A listing the store
+   * url-encoded (`query: { "encoding-type": "url" }`) is decoded, so keys read
+   * the same either way. Typed parameters replace any namesake in `query`.
    *
    * @param params - Listing options such as prefix, delimiter, and pagination.
    * @example
@@ -282,18 +282,17 @@ export class S3Client {
 
     const headers = createHeaders({ headers: params.headers });
 
-    const baseQuery: Record<string, string> = { "list-type": "2" };
-    if (params.prefix) baseQuery.prefix = params.prefix;
-    if (params.delimiter) baseQuery.delimiter = params.delimiter;
-    if (params.continuationToken) baseQuery["continuation-token"] = params.continuationToken;
-    if (typeof params.maxKeys === "number") baseQuery["max-keys"] = String(params.maxKeys);
+    /* The caller's query first, then every typed parameter replacing its namesake. */
+    applyQuery(url, params.query);
+    const query = url.searchParams;
+    query.set("list-type", "2");
+    if (params.prefix) query.set("prefix", params.prefix);
+    if (params.delimiter) query.set("delimiter", params.delimiter);
+    if (params.continuationToken) query.set("continuation-token", params.continuationToken);
+    if (params.startAfter) query.set("start-after", params.startAfter);
+    if (typeof params.maxKeys === "number") query.set("max-keys", String(params.maxKeys));
 
-    applyQuery(url, baseQuery);
-    if (params.query) {
-      applyQuery(url, params.query);
-    }
-
-    const text = await this.performXml(
+    return await this.performXml(
       {
         method: "GET",
         url,
@@ -305,8 +304,8 @@ export class S3Client {
         timeoutMs: this.deadline(params, false),
       },
       "ListBucketResult",
+      parseListObjectsV2,
     );
-    return parseListObjectsV2(text);
   }
 
   /**
@@ -383,8 +382,8 @@ export class S3Client {
       key,
     });
 
-    url.searchParams.set("uploads", "");
     applyQuery(url, params.query);
+    url.searchParams.set("uploads", "");
 
     const headers = createHeaders({
       headers: params.headers,
@@ -406,7 +405,7 @@ export class S3Client {
         timeoutMs: this.deadline(params, false),
       },
       "InitiateMultipartUploadResult",
-      (text) => extractTag(text, "UploadId") || undefined,
+      (text) => requiredTag(text, "UploadId"),
     );
 
     return { uploadId };
@@ -546,8 +545,7 @@ export class S3Client {
       contentType: "application/xml",
     });
 
-    let location: string | undefined;
-    const etag = await this.performXml(
+    return await this.performXml(
       {
         method: "POST",
         url,
@@ -560,14 +558,11 @@ export class S3Client {
         timeoutMs: this.deadline(params, false),
       },
       "CompleteMultipartUploadResult",
-      (text) => {
-        location = extractTag(text, "Location") || undefined;
-        const etag = extractTag(text, "ETag");
-        return etag ? ensureQuotedEtag(etag) : undefined;
-      },
+      (text) => ({
+        etag: ensureQuotedEtag(requiredTag(text, "ETag")),
+        location: extractTag(text, "Location") || undefined,
+      }),
     );
-
-    return { etag, location };
   }
 
   /**
@@ -689,18 +684,18 @@ export class S3Client {
   }
 
   /**
-   * Sends a request whose answer is an XML document, and returns that document
-   * once it is known to be the one asked for: its root element is `root`, and
-   * `pick`, when given, finds what the caller needs in it.
+   * Sends a request whose answer is an XML document, and returns what `read`
+   * makes of it once it is known to be the one asked for: its root element is
+   * `root`, and `read` finds everything it needs in it.
    *
    * Anything else is a failure of the attempt, retried like one. An `<Error>`
    * document is the failure it reports, whatever the status that carried it.
    */
-  private async performXml(
+  private async performXml<T>(
     context: PerformContext,
     root: string,
-    pick?: (text: string) => string | undefined,
-  ): Promise<string> {
+    read: (text: string) => T,
+  ): Promise<T> {
     return await this.exchange(context, async (response) => {
       const text = await response.text();
       const actual = xmlRoot(text);
@@ -716,18 +711,14 @@ export class S3Client {
             : `Expected a <${root}> document, got an empty body.`,
         );
       }
-      if (!pick) {
-        return text;
+      try {
+        return read(text);
+      } catch (error) {
+        if (error instanceof MalformedXml) {
+          throw invalidResponse(response, text, `The <${root}> document ${error.message}.`);
+        }
+        throw error;
       }
-      const value = pick(text);
-      if (value === undefined) {
-        throw invalidResponse(
-          response,
-          text,
-          `The <${root}> document is missing a required value.`,
-        );
-      }
-      return value;
     });
   }
 
@@ -1710,40 +1701,57 @@ function escapeXml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+/** A document that is the one asked for but lacks what it has to carry. */
+class MalformedXml extends Error {}
+
+/** The text of a `tag` that a document has to carry. */
+function requiredTag(xml: string, tag: string): string {
+  const value = extractTag(xml, tag);
+  if (!value) {
+    throw new MalformedXml(`has no <${tag}>`);
+  }
+  return value;
+}
+
 function parseListObjectsV2(xml: string): ListObjectsV2Response {
   const contents: ListObjectsV2Response["contents"] = [];
   const commonPrefixes: string[] = [];
+  /*
+   * A listing asked for with `encoding-type=url` url-encodes every name in
+   * it, a space as `+`. Decoded here, so a key reads the same however it was
+   * listed.
+   */
+  const urlEncoded = extractTag(xml, "EncodingType") === "url";
+  const name = (value: string): string =>
+    urlEncoded ? decodeURIComponent(value.replaceAll("+", " ")) : value;
 
-  for (const match of xml.matchAll(/<Contents(?:\s[^>]*)?>([\s\S]*?)<\/Contents\s*>/g)) {
+  for (const match of xml.matchAll(elementPattern("Contents", "g"))) {
     const section = match[1] ?? "";
-    const key = extractTag(section, "Key");
+    const key = name(requiredTag(section, "Key"));
     const size = extractTag(section, "Size");
-    const etag = extractTag(section, "ETag");
-    const lastModified = extractTag(section, "LastModified");
-    const storageClass = extractTag(section, "StorageClass") ?? undefined;
-    if (!key || !size || !lastModified) {
-      continue;
+    if (!size || !/^\d+$/.test(size)) {
+      throw new MalformedXml(`lists ${JSON.stringify(key)} without a valid <Size>`);
     }
+    const lastModified = extractTag(section, "LastModified");
+    if (!lastModified) {
+      throw new MalformedXml(`lists ${JSON.stringify(key)} without a <LastModified>`);
+    }
+    const etag = extractTag(section, "ETag");
     contents.push({
       key,
-      size: Number.parseInt(size, 10),
+      size: Number(size),
       etag: etag ? ensureQuotedEtag(etag) : undefined,
       lastModified,
-      storageClass,
+      storageClass: extractTag(section, "StorageClass") || undefined,
     });
   }
 
-  for (const match of xml.matchAll(
-    /<CommonPrefixes(?:\s[^>]*)?>([\s\S]*?)<\/CommonPrefixes\s*>/g,
-  )) {
-    const prefix = extractTag(match[1] ?? "", "Prefix");
-    if (prefix) {
-      commonPrefixes.push(prefix);
-    }
+  for (const match of xml.matchAll(elementPattern("CommonPrefixes", "g"))) {
+    commonPrefixes.push(name(requiredTag(match[1] ?? "", "Prefix")));
   }
 
   const isTruncated = extractTag(xml, "IsTruncated") === "true";
-  const nextContinuationToken = extractTag(xml, "NextContinuationToken") ?? undefined;
+  const nextContinuationToken = extractTag(xml, "NextContinuationToken") || undefined;
   /*
    * A store that answers V1 semantics — several S3-compatible ones do, ignoring
    * `list-type=2` outright — says "there is more" with `<NextMarker>` and never
@@ -1753,7 +1761,21 @@ function parseListObjectsV2(xml: string): ListObjectsV2Response {
    * `continuation-token` would be ignored by the store that asked for it — the
    * same page forever, wearing the fix's clothes.
    */
-  const nextMarker = extractTag(xml, "NextMarker") ?? undefined;
+  let nextMarker = extractTag(xml, "NextMarker");
+  nextMarker = nextMarker ? name(nextMarker) : undefined;
+  /*
+   * A V1 listing sends `<NextMarker>` only with a delimiter. Without one, the
+   * specification says to resume after the last name listed.
+   */
+  if (isTruncated && !nextContinuationToken && !nextMarker) {
+    const key = contents.at(-1)?.key;
+    const prefix = commonPrefixes.at(-1);
+    const last = key && prefix ? (key > prefix ? key : prefix) : (key ?? prefix);
+    if (!last) {
+      throw new MalformedXml("is truncated but names nowhere to resume");
+    }
+    nextMarker = last;
+  }
 
   return {
     contents,
@@ -1773,24 +1795,39 @@ function parseListObjectsV2(xml: string): ListObjectsV2Response {
  * because an attribute has to be separated by whitespace.
  */
 function extractTag(section: string, tag: string): string | undefined {
-  const regex = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}\\s*>`);
-  const match = section.match(regex);
-  const value = match?.[1];
-  return typeof value === "string" ? decodeXmlText(value) : undefined;
+  const match = elementPattern(tag).exec(section);
+  return match ? decodeXmlText(match[1] ?? "") : undefined;
 }
 
-const CDATA_SECTION = /^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/;
+/**
+ * Matches one `tag` element, its content in group 1. A self-closing element
+ * matches with no content rather than as an open tag. A CDATA section is
+ * consumed whole, so a closing tag inside one is text.
+ */
+function elementPattern(tag: string, flags?: string): RegExp {
+  return new RegExp(
+    `<${tag}(?:\\s[^>]*?)?(?:\\/>|>((?:<!\\[CDATA\\[[\\s\\S]*?\\]\\]>|[\\s\\S])*?)<\\/${tag}\\s*>)`,
+    flags,
+  );
+}
+
+const CDATA_SECTION = /<!\[CDATA\[([\s\S]*?)\]\]>/g;
 
 /**
  * Turns an element's raw content into the text it stands for.
  *
  * CDATA is the other way XML carries text that would otherwise need escaping,
  * and its content is literal: `&amp;` inside one is five characters, not an
- * ampersand, so the wrapper is stripped and nothing else is done to it.
+ * ampersand. Text around a section is decoded, the section itself is not.
  */
 function decodeXmlText(raw: string): string {
-  const cdata = CDATA_SECTION.exec(raw);
-  return cdata ? cdata[1]! : decodeXml(raw);
+  let text = "";
+  let last = 0;
+  for (const match of raw.matchAll(CDATA_SECTION)) {
+    text += decodeXml(raw.slice(last, match.index)) + match[1]!;
+    last = match.index + match[0].length;
+  }
+  return text + decodeXml(raw.slice(last));
 }
 
 const XML_ENTITIES: Record<string, string> = {
