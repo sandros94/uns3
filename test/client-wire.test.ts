@@ -15,6 +15,7 @@ import { createHash, createHmac } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { presignUrl } from "../src/core.ts";
 import { S3Client } from "../src/index.ts";
 import { BUCKET, clientAnswering, credentials } from "./_client.ts";
 
@@ -77,6 +78,15 @@ describe("request bytes", () => {
       const url = new URL(requests[0]!.url);
       expect(url.search).toContain("my%20report.pdf");
       expect(url.search).not.toContain("+");
+      expect(signatureMatches(requests[0]!)).toBe(true);
+    });
+
+    /* `|` sorts after `B`, but its encoding `%7C` sorts before it. */
+    it("orders the signed query by its encoded names", async () => {
+      const { client, requests } = clientAnswering(() => new Response("hi", { status: 200 }));
+
+      await client.get({ bucket: BUCKET, key: "plain.txt", query: { "aB": "2", "a|": "1" } });
+
       expect(signatureMatches(requests[0]!)).toBe(true);
     });
 
@@ -258,6 +268,42 @@ describe("request bytes", () => {
       expect(url.searchParams.get("X-Amz-SignedHeaders")).toBe("host");
       expect(signatureMatches(new Request(url))).toBe(true);
     });
+
+    /* Whoever holds the URL chooses the body, so there is no payload hash to sign. */
+    it.each(["PUT", "get"] as const)("signs an unsigned payload for a %s", async (method) => {
+      const { url } = await presignUrl({
+        method,
+        url: new URL("https://my-bucket.s3.us-east-1.amazonaws.com/k"),
+        credentials,
+        region: "us-east-1",
+      });
+
+      expect(signatureMatches(new Request(url, { method }))).toBe(true);
+    });
+  });
+
+  /*
+   * Hop-by-hop headers, and the others a proxy or runtime may add, drop or
+   * rewrite in transit, are sent but not signed: a signature over them depends
+   * on every hop between the client and the store.
+   */
+  describe("unsignable headers", () => {
+    it("sends a user agent and a trace id without signing them", async () => {
+      const { client, requests } = clientAnswering(() => new Response("hi", { status: 200 }));
+
+      await client.get({
+        bucket: BUCKET,
+        key: "plain.txt",
+        headers: { "user-agent": "my-app/1.0", "x-amzn-trace-id": "Root=1-5759e988-bd862e3fe1be" },
+      });
+
+      expect(requests[0]!.headers.get("user-agent")).toBe("my-app/1.0");
+      expect(requests[0]!.headers.get("x-amzn-trace-id")).toBe("Root=1-5759e988-bd862e3fe1be");
+      expect(requests[0]!.headers.get("authorization")).toContain(
+        "SignedHeaders=host;x-amz-content-sha256;x-amz-date,",
+      );
+      expect(signatureMatches(requests[0]!)).toBe(true);
+    });
   });
 
   /*
@@ -352,6 +398,16 @@ describe("request bytes", () => {
       expect(requests[0]!.headers.get("x-amz-date")).toBe("20230102T032405Z");
       expect(requests[1]!.headers.get("x-amz-date")).toBe("20230102T030405Z");
     });
+
+    it("presigns with the corrected clock too", async () => {
+      const { client } = clientAnswering(() => new Response("ok", { status: 200 }), {
+        clockSkewMs: 20 * 60 * 1000,
+      });
+
+      const url = new URL(await client.getSignedUrl({ method: "GET", bucket: BUCKET, key: "k" }));
+
+      expect(url.searchParams.get("X-Amz-Date")).toBe("20230102T032405Z");
+    });
   });
 });
 
@@ -371,10 +427,11 @@ function streamOf(text: string): ReadableStream<Uint8Array> {
  *
  * This is deliberately written against the request rather than against the
  * client's own signer: it reads the raw query string, decodes it by RFC 3986
- * rules (where `+` is a plus, not a space, which is the whole point), sorts,
- * re-encodes, and derives the signature with an independent HMAC. If the client
- * signs one query and sends another, the two signatures differ and this returns
- * false — exactly as a store would.
+ * rules (where `+` is a plus, not a space, which is the whole point),
+ * re-encodes, sorts the encoded pairs as the specification does, and derives
+ * the signature with an independent HMAC. If the client signs one query and
+ * sends another, the two signatures differ and this returns false — exactly as
+ * a store would.
  *
  * A request without an `Authorization` header is read as a presigned URL: the
  * signing parameters come from the query, `X-Amz-Signature` is left out of the
@@ -455,11 +512,11 @@ function canonicalQuery(search: string, exclude?: string): string {
       const separator = pair.indexOf("=");
       const key = separator === -1 ? pair : pair.slice(0, separator);
       const value = separator === -1 ? "" : pair.slice(separator + 1);
-      return { key: decodeURIComponent(key), value: decodeURIComponent(value) };
+      return { key: rfc3986(decodeURIComponent(key)), value: rfc3986(decodeURIComponent(value)) };
     })
     .filter((entry) => entry.key !== exclude)
     .sort((a, b) => (a.key === b.key ? compare(a.value, b.value) : compare(a.key, b.key)))
-    .map((entry) => `${rfc3986(entry.key)}=${rfc3986(entry.value)}`)
+    .map((entry) => `${entry.key}=${entry.value}`)
     .join("&");
 }
 

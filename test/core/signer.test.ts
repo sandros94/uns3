@@ -76,7 +76,6 @@ describe("signer", () => {
       url,
       credentials,
       region: "us-east-1",
-      unsignedPayload: true,
       expiresInSeconds: 900,
     });
 
@@ -87,6 +86,31 @@ describe("signer", () => {
     expect(credential).toBe(`${credentials.accessKeyId}/20230102/us-east-1/s3/aws4_request`);
     const signature = params.get("X-Amz-Signature");
     expect(signature).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 604_801])(
+    "refuses an expiry of %s seconds",
+    async (expiresInSeconds) => {
+      const url = new URL("https://my-bucket.s3.us-east-1.amazonaws.com/test.txt");
+
+      await expect(
+        presignUrl({ method: "GET", url, credentials, region: "us-east-1", expiresInSeconds }),
+      ).rejects.toThrow(RangeError);
+    },
+  );
+
+  it.each([1, 604_800])("accepts an expiry of %s seconds", async (expiresInSeconds) => {
+    const url = new URL("https://my-bucket.s3.us-east-1.amazonaws.com/test.txt");
+
+    const { url: presigned } = await presignUrl({
+      method: "GET",
+      url,
+      credentials,
+      region: "us-east-1",
+      expiresInSeconds,
+    });
+
+    expect(presigned.searchParams.get("X-Amz-Expires")).toBe(String(expiresInSeconds));
   });
 
   it("handles keys with special characters without double-encoding", async () => {
@@ -112,7 +136,6 @@ describe("signer", () => {
       url,
       credentials,
       region: "us-east-1",
-      unsignedPayload: true,
       expiresInSeconds: 900,
     });
 

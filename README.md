@@ -250,6 +250,10 @@ const uploadUrl = await client.getSignedUrl({
 console.log("Upload URL:", uploadUrl);
 ```
 
+`expiresInSeconds` defaults to 900 (15 minutes) and must be an integer from 1 to 604800 (seven days). Anything else throws a `RangeError`.
+
+Everything the URL needs is in its query, session token included, so it works as a plain link in a browser, an `<img>` or `curl`. The body is not signed, so a presigned `PUT` accepts whatever body is sent. Headers passed in `headers` are signed, and whoever uses the URL has to send them with the same values.
+
 ### Multipart Upload
 
 For large files, you can use multipart uploads.

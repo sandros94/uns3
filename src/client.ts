@@ -315,6 +315,7 @@ export class S3Client {
    * effect here — whoever later fetches the URL owns the response.
    *
    * @param params - Method, bucket/key, expiry, and optional overrides.
+   * @throws {RangeError} When `expiresInSeconds` is not an integer from 1 to 604800.
    * @example
    * ```ts
    * const url = await client.getSignedUrl({
@@ -350,8 +351,8 @@ export class S3Client {
       headers,
       credentials,
       region: this.region,
+      datetime: this.createSigningDate(),
       expiresInSeconds: params.expiresInSeconds,
-      unsignedPayload: true,
     });
 
     return result.url.toString();

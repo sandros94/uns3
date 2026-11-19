@@ -1,5 +1,5 @@
 import type { Credentials, Methods } from "../../types.ts";
-import { encodeQueryString, uriEncode } from "../utils/encode.ts";
+import { uriEncode } from "../utils/encode.ts";
 import { isArrayBuffer, isArrayBufferView, isBlob, isReadableStream } from "../utils/is.ts";
 import { finalizeQuery } from "./serializer.ts";
 
@@ -35,8 +35,8 @@ export interface PresignInput {
   credentials: Credentials;
   headers?: Headers;
   datetime?: Date;
+  /** URL validity in seconds, an integer from 1 to 604800 (seven days). Defaults to 900. */
   expiresInSeconds?: number;
-  unsignedPayload?: boolean;
 }
 
 /** Result of a presigned URL generation, containing the signed URL and associated metadata. */
@@ -107,22 +107,26 @@ export async function signRequest(input: SignRequestInput): Promise<SignRequestR
  * Generates a SigV4 presigned URL by appending the signature parameters to the
  * provided URL without mutating the original instance.
  *
+ * The payload is always signed as `UNSIGNED-PAYLOAD`: whoever holds the URL
+ * chooses the body.
+ *
  * @param input - Method, URL, credentials, headers, and expiry configuration.
+ * @throws {RangeError} When `expiresInSeconds` is not an integer from 1 to 604800.
  */
 export async function presignUrl(input: PresignInput): Promise<PresignResult> {
+  const expires = resolveExpiry(input.expiresInSeconds);
   const { credentials, region } = input;
   const date = input.datetime ?? new Date();
   const { amzDate, shortDate } = formatAmzDate(date);
   const headers = cloneHeaders(input.headers);
   ensureHost(headers, input.url);
 
-  const payloadHash = await resolvePresignPayloadHash(input);
+  const payloadHash = UNSIGNED_PAYLOAD;
 
   const { canonical, signedHeaders } = canonicalizeHeaders(headers);
   const credentialScope = `${shortDate}/${region}/${SERVICE}/aws4_request`;
   const credential = `${credentials.accessKeyId}/${credentialScope}`;
 
-  const expires = clampExpiry(input.expiresInSeconds ?? 900);
   const presignedUrl = new URL(input.url.toString()); // Prevent mutation
   const search = presignedUrl.searchParams;
   search.set("X-Amz-Algorithm", "AWS4-HMAC-SHA256");
@@ -210,12 +214,6 @@ async function resolvePayloadHash(input: SignRequestInput, headers: Headers): Pr
   return UNSIGNED_PAYLOAD;
 }
 
-async function resolvePresignPayloadHash(input: PresignInput): Promise<string> {
-  if (input.unsignedPayload) return UNSIGNED_PAYLOAD;
-  if (input.method === "GET" || input.method === "HEAD") return UNSIGNED_PAYLOAD;
-  return await sha256Hex(encoder.encode(""));
-}
-
 function ensureHost(headers: Headers, url: URL) {
   if (!headers.has("host")) {
     headers.set("host", url.host);
@@ -233,6 +231,35 @@ function cloneHeaders(headers?: Headers): Headers {
   return next;
 }
 
+/**
+ * Headers that are sent but never signed: hop-by-hop headers and others a
+ * proxy or runtime may add, drop or rewrite in transit. Signing one ties the
+ * signature to a hop the client does not control. This is the set
+ * `@smithy/signature-v4` leaves unsigned.
+ */
+const UNSIGNABLE_HEADERS = new Set([
+  "authorization",
+  "cache-control",
+  "connection",
+  "expect",
+  "from",
+  "keep-alive",
+  "max-forwards",
+  "pragma",
+  "referer",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "user-agent",
+  "x-amzn-trace-id",
+]);
+const UNSIGNABLE_HEADER_PREFIX = /^(?:proxy-|sec-)/;
+
+function isUnsignableHeader(name: string): boolean {
+  return UNSIGNABLE_HEADERS.has(name) || UNSIGNABLE_HEADER_PREFIX.test(name);
+}
+
 function canonicalizeHeaders(headers: Headers): {
   canonical: string;
   signedHeaders: string;
@@ -242,7 +269,7 @@ function canonicalizeHeaders(headers: Headers): {
   // eslint-disable-next-line unicorn/no-array-for-each
   headers.forEach((value, key) => {
     const lower = key.trim().toLowerCase();
-    if (!lower) {
+    if (!lower || isUnsignableHeader(lower)) {
       return;
     }
     const normalized = value.trim().replace(/\s+/g, " ");
@@ -310,14 +337,19 @@ function getCanonicalUri(pathname: string): string {
 
 /**
  * Builds the canonical query for signing: the same RFC 3986 encoding the wire
- * gets from {@link finalizeQuery}, sorted as the specification requires.
+ * gets from {@link finalizeQuery}, then sorted by encoded name and encoded
+ * value. The specification sorts after encoding, and the order differs from
+ * that of the raw strings: `|` sorts after `B`, its encoding `%7C` before it.
  */
 function getCanonicalQuery(params: URLSearchParams): string {
-  const entries: Array<[string, string]> = [...params];
+  const entries = [...params].map(([key, value]): [string, string] => [
+    uriEncode(key, true),
+    uriEncode(value, true),
+  ]);
   entries.sort(([aKey, aValue], [bKey, bValue]) =>
     aKey === bKey ? compareStrings(aValue, bValue) : compareStrings(aKey, bKey),
   );
-  return encodeQueryString(entries);
+  return entries.map(([key, value]) => `${key}=${value}`).join("&");
 }
 
 function compareStrings(a: string, b: string): number {
@@ -369,8 +401,17 @@ function buildAuthorizationHeader(
 
 const MAX_PRESIGN_EXPIRY = 7 * 24 * 60 * 60;
 
-function clampExpiry(value: number): number {
-  return Math.min(Math.max(value, 1), MAX_PRESIGN_EXPIRY);
+/**
+ * Refuses an expiry SigV4 cannot express rather than signing a different one.
+ * `X-Amz-Expires` is a whole number of seconds, at most seven days.
+ */
+function resolveExpiry(value: number = 900): number {
+  if (!Number.isInteger(value) || value < 1 || value > MAX_PRESIGN_EXPIRY) {
+    throw new RangeError(
+      `Presigned URL expiry must be an integer from 1 to ${MAX_PRESIGN_EXPIRY} seconds, got ${value}.`,
+    );
+  }
+  return value;
 }
 
 function formatAmzDate(date: Date): { amzDate: string; shortDate: string } {

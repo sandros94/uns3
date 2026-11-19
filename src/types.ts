@@ -359,48 +359,12 @@ export type PresignMethod = "GET" | "PUT" | "HEAD" | "DELETE";
 export interface PresignParams extends BaseRequest {
   /** HTTP method the presigned URL will authorize. */
   method: PresignMethod;
-  /** URL validity duration in seconds. Defaults vary by provider (typically 3600). */
+  /** URL validity in seconds, an integer from 1 to 604800 (seven days). Defaults to 900. */
   expiresInSeconds?: number;
 }
 
 /** Resolves a content type from an object key and an optional explicit value. Return `undefined` to omit the header. */
 export type ContentTypeResolver = (key: string, explicit?: string | false) => string | undefined;
-
-/** Metadata produced by the SigV4 signing process. */
-export interface SignedRequestMetadata {
-  /** The full `Authorization` header value. */
-  authorization: string;
-  /** `x-amz-date` timestamp used in the signature. */
-  amzDate: string;
-  /** Semicolon-delimited list of headers included in the signature. */
-  signedHeaders: string;
-}
-
-/** Input required to sign an outgoing request. */
-export interface SigningInit {
-  /** HTTP method (e.g., `"GET"`, `"PUT"`). */
-  method: string;
-  /** Fully-resolved request URL. */
-  url: URL;
-  /** Request headers to include in the signature. */
-  headers: Headers;
-  /** Pre-computed hex-encoded SHA-256 hash of the payload, or `"UNSIGNED-PAYLOAD"`. */
-  payloadHash?: string;
-}
-
-/** Result of signing request headers with SigV4. */
-export interface SignedHeaderResult {
-  /** Headers augmented with the `Authorization` and `x-amz-date` headers. */
-  headers: Headers;
-  /** Signing metadata for inspection or debugging. */
-  metadata: SignedRequestMetadata;
-}
-
-/** Result of generating a presigned URL. */
-export interface PresignedUrlResult {
-  /** The presigned URL with query-string authentication parameters. */
-  url: URL;
-}
 
 /** Options passed to the transport layer when executing a request. */
 export interface TransportOptions {
