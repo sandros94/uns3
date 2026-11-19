@@ -35,23 +35,22 @@
     "test:unit": "vitest run --slowTestThreshold=1000 --project unit",
     "test:integration": "vitest run --slowTestThreshold=1000 --project integration",
     "test:coverage": "vitest run --coverage --slowTestThreshold=1000",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "bench": "vitest bench --run"
   },
   "devDependencies": {
-    "@types/node": "^24",
-    "@typescript/native-preview": "7.0.0-dev.20260707.2",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@types/node": "^26.6.6",
+    "@vitest/coverage-v8": "^5.1.1",
     "automd": "^0.4.3",
     "nano-staged": "^1.0.2",
-    "obuild": "^0.4.38",
-    "oxfmt": "^0.64.0",
-    "oxlint": "^1.79.0",
-    "oxlint-tsgolint": "^7.0.2001",
-    "simple-git-hooks": "^2.13.1",
-    "testcontainers": "^12.1.0",
+    "obuild": "^0.4.45",
+    "oxfmt": "^0.79.0",
+    "oxlint": "^1.94.0",
+    "oxlint-tsgolint": "^7.0.2007",
+    "simple-git-hooks": "^2.14.0",
+    "testcontainers": "^12.2.1",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.11"
+    "vitest": "^5.1.1"
   },
   "resolutions": {
     "uns3": "link:."
@@ -67,7 +66,7 @@
   "devEngines": {
     "packageManager": {
       "name": "pnpm",
-      "version": "11.23.0",
+      "version": "12.21.0",
       "onFail": "download"
     },
     "runtime": {
@@ -79,5 +78,5 @@
   "engines": {
     "node": "^22.12 || >=24"
   },
-  "packageManager": "pnpm@11.23.0"
+  "packageManager": "pnpm@12.21.0"
 }

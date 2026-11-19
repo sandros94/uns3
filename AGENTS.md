@@ -11,7 +11,7 @@ uns3 is a tiny, zero-dependency, runtime-agnostic S3 client that works across No
 - **Prepare**: `pnpm dev:prepare` (stub build + git hooks; what CI runs first)
 - **Lint**: `pnpm lint` (`oxlint .` then `oxfmt --check .`)
 - **Lint fix**: `pnpm fmt` (automd + `oxlint --fix` + `oxfmt`)
-- **Type check**: `pnpm typecheck` (`tsgo --noEmit`)
+- **Type check**: `pnpm typecheck` (`tsc --noEmit`, TypeScript 7 native compiler)
 - **Test all**: `pnpm test` (both vitest projects)
 - **Unit only**: `pnpm test:unit` (fast; no container runtime needed)
 - **Integration only**: `pnpm test:integration` (real stores in containers)
