@@ -311,6 +311,50 @@ describe("request bytes", () => {
    * whole story — here the only question is whether the client refuses before it
    * writes somewhere the caller never named.
    */
+  /*
+   * The content type is the caller's first: the `contentType` parameter, then
+   * a `content-type` header, then a Blob's own type. Only when none of them
+   * says anything is it inferred from the key.
+   */
+  describe("content type", () => {
+    const sent = async (params: Parameters<S3Client["put"]>[0]): Promise<string | null> => {
+      const { client, requests } = clientAnswering(() => new Response(null, { status: 200 }));
+      await client.put(params);
+      return requests[0]!.headers.get("content-type");
+    };
+
+    it("keeps a content-type header over the one the key suggests", async () => {
+      await expect(
+        sent({ bucket: BUCKET, key: "a.json", body: "x", headers: { "content-type": "text/csv" } }),
+      ).resolves.toBe("text/csv");
+    });
+
+    it("keeps a Blob's own type over the one the key suggests", async () => {
+      const body = new Blob(["png"], { type: "image/png" });
+      await expect(sent({ bucket: BUCKET, key: "photo.bin", body })).resolves.toBe("image/png");
+    });
+
+    it("sends no content type at all when told not to", async () => {
+      await expect(
+        sent({ bucket: BUCKET, key: "a.txt", body: "x", contentType: false }),
+      ).resolves.toBeNull();
+      await expect(
+        sent({
+          bucket: BUCKET,
+          key: "a.txt",
+          body: new Blob(["x"], { type: "text/plain" }),
+          contentType: false,
+        }),
+      ).resolves.toBeNull();
+    });
+
+    it("sends none when nothing names one", async () => {
+      await expect(
+        sent({ bucket: BUCKET, key: "x.constructor", body: new Uint8Array([1]) }),
+      ).resolves.toBeNull();
+    });
+  });
+
   describe("keys with dot segments", () => {
     it("refuses to write a key a URL would rewrite", async () => {
       const { client, requests } = clientAnswering(() => new Response(null, { status: 200 }));

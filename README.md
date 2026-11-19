@@ -127,6 +127,8 @@ console.log("Size:", response.headers.get("content-length"));
 
 Uploads an object to an S3 bucket. The `body` can be a `string`, `Blob`, `ArrayBuffer`, `Uint8Array`, or a `ReadableStream`.
 
+The content type is taken from `contentType`, else from a `content-type` header, else from the body itself (a Blob's type, or JSON for a plain object), and only then inferred from the key's extension. `contentType: false` sends none at all.
+
 ```typescript
 // Upload from a string
 await client.put({

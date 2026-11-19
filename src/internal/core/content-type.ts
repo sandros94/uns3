@@ -47,21 +47,11 @@ export function resolveContentType(
 
 // #region Internal
 
+/** A key is a name, not a URL: `?` and `#` are ordinary characters in it. */
 function lookupExtension(key: string): string | undefined {
-  const questionIndex = key.indexOf("?");
-  const hashIndex = key.indexOf("#");
-  let end = key.length;
-  if (questionIndex !== -1) {
-    end = Math.min(end, questionIndex);
-  }
-  if (hashIndex !== -1) {
-    end = Math.min(end, hashIndex);
-  }
-  const normalized = key.slice(0, end);
-  const lastDot = normalized.lastIndexOf(".");
+  const lastDot = key.lastIndexOf(".");
   if (lastDot === -1) {
     return undefined;
   }
-  const ext = normalized.slice(lastDot + 1);
-  return lookup(ext);
+  return lookup(key.slice(lastDot + 1));
 }

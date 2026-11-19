@@ -36,7 +36,7 @@ import type {
   UploadPartResult,
 } from "./types.ts";
 import { S3Error } from "./error.ts";
-import { isPlainObject } from "./utils.ts";
+import { isBlob, isPlainObject } from "./utils.ts";
 
 interface RequestOptions {
   /** Whether the request moves object bytes, which gives it no default deadline. */
@@ -175,8 +175,9 @@ export class S3Client {
   }
 
   /**
-   * Uploads an object using PUT semantics. Content-Type is resolved via the
-   * configured resolver when not explicitly supplied.
+   * Uploads an object using PUT semantics. The content type is the caller's
+   * `contentType`, else a `content-type` header, else the body's own type,
+   * and only then inferred from the key by the configured resolver.
    *
    * Supports optional conditional headers (`ifMatch`, `ifNoneMatch`) for conditional
    * overwrites. Note that not all S3-compatible providers support these headers.
@@ -201,23 +202,22 @@ export class S3Client {
    * ```
    */
   async put(params: PutObjectParams): Promise<Response> {
-    const { body: rawBody, contentType: rawContentType } = params;
     let body: BodyInit | ReadableStream<Uint8Array> | null;
-    let contentType: string | false | undefined;
+    let ownType: string | undefined;
 
-    if (isPlainObject(rawBody)) {
-      body = JSON.stringify(rawBody);
-      contentType = rawContentType === undefined ? "application/json" : rawContentType;
+    if (isPlainObject(params.body)) {
+      body = JSON.stringify(params.body);
+      ownType = "application/json";
     } else {
-      body = rawBody as BodyInit | ReadableStream<Uint8Array> | null;
-      contentType = rawContentType;
+      body = params.body as BodyInit | ReadableStream<Uint8Array> | null;
+      ownType = isBlob(body) ? body.type : undefined;
     }
 
-    const resolvedContentType = resolveContentType(
-      params.key,
-      contentType,
-      this.contentTypeResolver,
-    );
+    if (params.contentType === false) {
+      body = withoutImplicitType(body);
+    }
+
+    const resolvedContentType = this.chooseContentType(params, ownType);
     return await this.execute("PUT", params, {
       movesBytes: true,
       body,
@@ -374,7 +374,7 @@ export class S3Client {
   async initiateMultipart(params: MultipartInitParams): Promise<MultipartInitResult> {
     const bucket = this.resolveBucket(params.bucket);
     const key = this.resolveKey(params);
-    const contentType = resolveContentType(key, params.contentType, this.contentTypeResolver);
+    const contentType = this.chooseContentType(params, undefined);
     const url = buildRequestUrl({
       endpoint: this.endpoint,
       bucketStyle: this.bucketStyle,
@@ -847,6 +847,25 @@ export class S3Client {
         await this.delay(delayMs, context.signal);
       }
     }
+  }
+
+  /**
+   * The content type to set, or `undefined` to set none. The caller's own word
+   * comes first: the `contentType` parameter, then a `content-type` header,
+   * then the type the body carries. Only when none of them says anything is
+   * one inferred from the key. `contentType: false` sets none at all.
+   */
+  private chooseContentType(
+    params: { key: string; contentType?: string | false; headers?: HeadersInit },
+    ownType: string | undefined,
+  ): string | undefined {
+    const { key, contentType } = params;
+    if (contentType === false) return undefined;
+    if (contentType !== undefined) {
+      return resolveContentType(key, contentType, this.contentTypeResolver);
+    }
+    if (new Headers(params.headers).has("content-type")) return undefined;
+    return ownType || resolveContentType(key, undefined, this.contentTypeResolver);
   }
 
   private resolveBucket(bucket: string | undefined): string {
@@ -1364,6 +1383,18 @@ function isRetriableStatus(status: number): boolean {
     return true;
   }
   return status >= 500 && status !== 501 && status !== 505;
+}
+
+/**
+ * The same bytes, in a form `fetch` attaches no content type to: a string
+ * would go out as `text/plain`, a typed Blob as its own type.
+ */
+function withoutImplicitType(
+  body: BodyInit | ReadableStream<Uint8Array> | null,
+): BodyInit | ReadableStream<Uint8Array> | null {
+  if (typeof body === "string") return textEncoder.encode(body);
+  if (isBlob(body) && body.type) return body.slice(0, body.size, "");
+  return body;
 }
 
 /**

@@ -215,7 +215,11 @@ export interface PutObjectParams
    * as a bare `fetch failed`. Pass the body's byte length or leave it out.
    */
   contentLength?: number;
-  /** Explicit MIME type. Set to `false` to suppress automatic detection. */
+  /**
+   * Explicit MIME type, ahead of a `content-type` header, the body's own type
+   * (a Blob's, or JSON for a plain object) and inference from the key, in that
+   * order. `false` sends no content type at all.
+   */
   contentType?: string | false;
   /** Value for the `Cache-Control` header. */
   cacheControl?: string;
@@ -235,7 +239,10 @@ export interface DeleteObjectParams extends BaseRequest {
 export interface MultipartInitParams extends BaseRequest {
   /** Object key for the multipart upload. */
   key: string;
-  /** Explicit MIME type. Set to `false` to suppress automatic detection. */
+  /**
+   * Explicit MIME type, ahead of a `content-type` header and inference from the
+   * key, in that order. `false` sends no content type at all.
+   */
   contentType?: string | false;
   /** Value for the `Cache-Control` header. */
   cacheControl?: string;
