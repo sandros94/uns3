@@ -17,12 +17,19 @@ export type CredentialsProvider = () => Promise<Credentials> | Credentials;
 /** Determines how the bucket name is placed in the request URL: `"virtual"` for virtual-hosted style or `"path"` for path-style. */
 export type BucketStyle = "virtual" | "path";
 
-/** Byte range for partial object retrieval (Range header). */
+/**
+ * Byte range for partial object retrieval (Range header).
+ *
+ * Either `start` and/or `end`, or `suffix` alone. A missing `start` reads from
+ * the first byte, and a missing `end` reads to the last one.
+ */
 export interface ByteRange {
-  /** Zero-based start offset (inclusive). */
+  /** Zero-based start offset (inclusive). Defaults to `0`. */
   start?: number;
-  /** Zero-based end offset (inclusive). */
+  /** Zero-based end offset (inclusive). Defaults to the last byte. */
   end?: number;
+  /** Number of bytes to read from the end of the object. Cannot be combined with `start` or `end`. */
+  suffix?: number;
 }
 
 /** Conditional request headers for cache validation and optimistic concurrency. */

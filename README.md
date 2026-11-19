@@ -81,6 +81,12 @@ const partialResponse = await client.get({
 });
 console.log(partialResponse.status); // 206
 const chunk = await partialResponse.arrayBuffer();
+
+// Get the last 1KB, whatever the object's size
+const tail = await client.get({
+  key: "my-large-file.zip",
+  range: { suffix: 1024 },
+});
 ```
 
 **Expected statuses**

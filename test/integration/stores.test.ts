@@ -298,8 +298,8 @@ describe.skipIf(!canRun(SELECTED)).each(SELECTED)("$name", (spec: StoreSpec) => 
 
       await seed(client, key, body, "application/octet-stream");
 
-      /* `end` with no `start` is `bytes=-4`: the LAST four bytes, not the first. */
-      const read = await client.get({ key, range: { end: 4 } });
+      /* `suffix` is `bytes=-4`: the LAST four bytes, not the first. */
+      const read = await client.get({ key, range: { suffix: 4 } });
       expect(read.status).toBe(206);
       expect(read.headers.get("content-range")).toBe("bytes 252-255/256");
       await expect(bytesOf(read)).resolves.toEqual(body.slice(252));

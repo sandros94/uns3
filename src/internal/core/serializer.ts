@@ -123,24 +123,31 @@ function formatRange(range: ByteRange | undefined): string | undefined {
   if (!range) return undefined;
   const start = normalizeRangeBoundary(range.start, "start");
   const end = normalizeRangeBoundary(range.end, "end");
+  const suffix = normalizeRangeBoundary(range.suffix, "suffix");
+  if (suffix !== undefined) {
+    if (start !== undefined || end !== undefined) {
+      throw new RangeError("Range suffix cannot be combined with start or end");
+    }
+    if (suffix === 0) {
+      throw new RangeError("Range suffix must be greater than zero");
+    }
+    return `bytes=-${suffix}`;
+  }
   if (start === undefined && end === undefined) {
     return undefined;
   }
   if (start !== undefined && end !== undefined && start > end) {
     throw new RangeError("Range start must be less than or equal to end");
   }
-  if (start === undefined) {
-    return `bytes=-${end}`;
-  }
   if (end === undefined) {
     return `bytes=${start}-`;
   }
-  return `bytes=${start}-${end}`;
+  return `bytes=${start ?? 0}-${end}`;
 }
 
 function normalizeRangeBoundary(
   value: number | undefined,
-  label: "start" | "end",
+  label: "start" | "end" | "suffix",
 ): number | undefined {
   if (value === undefined) return undefined;
   if (!Number.isFinite(value)) {

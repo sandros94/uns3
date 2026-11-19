@@ -13,6 +13,24 @@ describe("serializer helpers", () => {
     expect(headers.get("x-custom")).toBe("value");
   });
 
+  it("reads a range with only an end from the first byte", () => {
+    /* `bytes=-499` would be the last 499 bytes (RFC 9110 §14.1.2), not bytes 0 through 499. */
+    expect(createHeaders({ range: { end: 499 } }).get("range")).toBe("bytes=0-499");
+  });
+
+  it("sends a suffix range for the last bytes of an object", () => {
+    expect(createHeaders({ range: { suffix: 500 } }).get("range")).toBe("bytes=-500");
+  });
+
+  it("refuses a suffix that is not a positive integer or that is combined with offsets", () => {
+    /* A zero-length suffix is unsatisfiable, so it never reaches the store. */
+    for (const suffix of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => createHeaders({ range: { suffix } })).toThrow(RangeError);
+    }
+    expect(() => createHeaders({ range: { suffix: 10, start: 0 } })).toThrow(RangeError);
+    expect(() => createHeaders({ range: { suffix: 10, end: 99 } })).toThrow(RangeError);
+  });
+
   it("applies query parameters including arrays", () => {
     const url = new URL("https://example.com");
     applyQuery(url, {
