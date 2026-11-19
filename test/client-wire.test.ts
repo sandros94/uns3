@@ -458,6 +458,36 @@ describe("request bytes", () => {
     });
   });
 
+  describe("put bodies", () => {
+    it.each([
+      ["a Map", new Map([["a", 1]])],
+      ["a Date", new Date(0)],
+      [
+        "a class instance",
+        new (class Point {
+          x = 1;
+        })(),
+      ],
+    ])("refuses %s rather than sending its string form", async (_name, body) => {
+      const { client, requests } = clientAnswering(() => new Response(null, { status: 200 }));
+
+      await expect(
+        client.put({ bucket: BUCKET, key: "a.json", body: body as never }),
+      ).rejects.toThrow(TypeError);
+      expect(requests).toHaveLength(0);
+    });
+
+    it("sends a plain object or an array as JSON", async () => {
+      const { client, requests } = clientAnswering(() => new Response(null, { status: 200 }));
+
+      await client.put({ bucket: BUCKET, key: "a", body: { a: [1, 2] } });
+      await client.put({ bucket: BUCKET, key: "b", body: [1, "two"] });
+
+      await expect(requests[0]!.text()).resolves.toBe('{"a":[1,2]}');
+      await expect(requests[1]!.text()).resolves.toBe('[1,"two"]');
+    });
+  });
+
   describe("keys with dot segments", () => {
     it("refuses to write a key a URL would rewrite", async () => {
       const { client, requests } = clientAnswering(() => new Response(null, { status: 200 }));

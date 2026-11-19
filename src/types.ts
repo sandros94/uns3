@@ -209,7 +209,9 @@ export interface PutObjectParams
   /** Object key to write. */
   key: string;
   /**
-   * Request body; plain objects are JSON-serialized automatically.
+   * Request body. A plain object or an array is sent as JSON. Any other
+   * object that is not a body `fetch` can send as bytes is refused with a
+   * `TypeError`, rather than sent as its string form.
    *
    * A `ReadableStream` is sent as it arrives and is never retried: it is
    * consumed by the attempt that sent it, so there is no second attempt to
@@ -217,7 +219,7 @@ export interface PutObjectParams
    * hashing it would mean buffering it, which is the thing a stream is for
    * avoiding.
    */
-  body: BodyInit | ReadableStream<Uint8Array> | null | object;
+  body: BodyInit | ReadableStream<Uint8Array> | null | Record<string, unknown> | unknown[];
   /**
    * Declares the body's size in bytes, which is what makes a streamed upload
    * work everywhere. A `ReadableStream` with no length goes out as

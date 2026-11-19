@@ -36,7 +36,13 @@ import type {
   UploadPartResult,
 } from "./types.ts";
 import { S3Error } from "./error.ts";
-import { isBlob, isPlainObject } from "./utils.ts";
+import {
+  isArrayBuffer,
+  isArrayBufferView,
+  isBlob,
+  isPlainObject,
+  isReadableStream,
+} from "./utils.ts";
 
 interface RequestOptions {
   /** Whether the request moves object bytes, which gives it no default deadline. */
@@ -209,9 +215,13 @@ export class S3Client {
     if (isPlainObject(params.body)) {
       body = JSON.stringify(params.body);
       ownType = "application/json";
-    } else {
-      body = params.body as BodyInit | ReadableStream<Uint8Array> | null;
+    } else if (isBodyInit(params.body)) {
+      body = params.body;
       ownType = isBlob(body) ? body.type : undefined;
+    } else {
+      throw new TypeError(
+        "put() takes a string, Blob, ArrayBuffer, typed array, ReadableStream, FormData, URLSearchParams, plain object or array as its body.",
+      );
     }
 
     if (params.contentType === false) {
@@ -1385,6 +1395,23 @@ function isRetriableStatus(status: number): boolean {
     return true;
   }
   return status >= 500 && status !== 501 && status !== 505;
+}
+
+/**
+ * Whether `fetch` sends a value as the bytes it holds. Anything else it sends
+ * as its string form, `[object Map]` and the like.
+ */
+function isBodyInit(value: unknown): value is BodyInit | ReadableStream<Uint8Array> | null {
+  return (
+    value === null ||
+    typeof value === "string" ||
+    isBlob(value) ||
+    isArrayBuffer(value) ||
+    isArrayBufferView(value) ||
+    isReadableStream(value) ||
+    (typeof FormData !== "undefined" && value instanceof FormData) ||
+    (typeof URLSearchParams !== "undefined" && value instanceof URLSearchParams)
+  );
 }
 
 /**
