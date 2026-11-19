@@ -42,7 +42,7 @@ import { S3Client, S3Error } from "https://esm.sh/uns3";
 
 ### Initialization
 
-First, create an instance of the `S3Client`. You need to provide your endpoint and credentials. The `region` defaults to `"auto"`, which is accepted by most S3-compatible providers; for AWS, specify the actual region (e.g. `"us-east-1"`).
+First, create an instance of the `S3Client`. You need to provide your endpoint and credentials. The `region` defaults to `"auto"`, which is accepted by most S3-compatible providers. For AWS, specify the actual region (e.g. `"us-east-1"`).
 
 ```typescript
 import { S3Client } from "uns3";
@@ -59,6 +59,15 @@ const client = new S3Client({
   defaultBucket: "my-bucket",
 });
 ```
+
+Other options:
+
+- `credentials` can also be a function returning them, sync or async, for rotating credentials. Leave it out for anonymous requests.
+- `bucketStyle`: `"virtual"` (the default) puts the bucket in the host name, `"path"` in the path. Virtual falls back to path style where a subdomain cannot work: bucket names that are not DNS-compatible, dotted names over HTTPS, and IP or `localhost` endpoints.
+- `checksum`: `{ algorithm: "sha256" | "crc32c", requireOnPut?: boolean }` adds an integrity checksum to every `put` and `uploadPart` body that can be hashed. With `requireOnPut`, a body that cannot be (a stream, or a Blob over 16 MiB) is refused instead of sent without one.
+- `clockSkewMs`: an offset added to the local clock when signing. The client also corrects itself once the store's clock is five minutes or more away.
+- `retry` and `timeoutMs`: see [Retries and timeouts](#retries-and-timeouts).
+- `fetch` and `contentTypeResolver` replace the global `fetch` and the extension-based content type lookup.
 
 ### Methods
 

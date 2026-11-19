@@ -197,13 +197,13 @@ export interface ObjectRequest extends BaseRequest, ConditionalHeaders {
   range?: ByteRange;
 }
 
-/** Parameters for `getObject`. */
+/** Parameters for `get`. */
 export type GetObjectParams = ObjectRequest;
 
-/** Parameters for `headObject`. */
+/** Parameters for `head`. */
 export type HeadObjectParams = ObjectRequest;
 
-/** Parameters for `putObject`. */
+/** Parameters for `put`. */
 export interface PutObjectParams
   extends BaseRequest, Pick<ConditionalHeaders, "ifMatch" | "ifNoneMatch"> {
   /** Object key to write. */
@@ -248,7 +248,7 @@ export interface PutObjectParams
   contentEncoding?: string;
 }
 
-/** Parameters for `deleteObject`. */
+/** Parameters for `del`. */
 export interface DeleteObjectParams extends BaseRequest {
   /** Object key to delete. */
   key: string;
@@ -281,7 +281,7 @@ export interface MultipartInitResult {
 export interface UploadPartParams extends BaseRequest {
   /** Object key matching the initiated upload. */
   key: string;
-  /** Upload identifier returned by `multipartInit`. */
+  /** Upload identifier returned by `initiateMultipart`. */
   uploadId: string;
   /** 1-based part number (must be unique within the upload). */
   partNumber: number;
@@ -313,7 +313,7 @@ export interface CompleteMultipartParams
   extends BaseRequest, Pick<ConditionalHeaders, "ifMatch" | "ifNoneMatch"> {
   /** Object key matching the initiated upload. */
   key: string;
-  /** Upload identifier returned by `multipartInit`. */
+  /** Upload identifier returned by `initiateMultipart`. */
   uploadId: string;
   /**
    * The uploaded parts with their part numbers and ETags, and the checksum
