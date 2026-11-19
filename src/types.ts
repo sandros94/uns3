@@ -120,7 +120,11 @@ export interface S3ClientConfig {
   credentials?: Credentials | CredentialsProvider;
   /** Bucket name used when individual requests omit `bucket`. */
   defaultBucket?: string;
-  /** URL style for bucket addressing. Defaults to `"virtual"`. */
+  /**
+   * URL style for bucket addressing. Defaults to `"virtual"`, which falls back
+   * to path style for buckets a subdomain cannot reach: names that are not
+   * DNS-compatible, dotted names over HTTPS, and IP or `localhost` endpoints.
+   */
   bucketStyle?: BucketStyle;
   /** Custom `fetch` implementation; defaults to the global `fetch`. */
   fetch?: typeof fetch;

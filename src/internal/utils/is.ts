@@ -28,10 +28,15 @@ export function isReadableStream(value: unknown): value is ReadableStream<Uint8A
   return typeof ReadableStream !== "undefined" && value instanceof ReadableStream;
 }
 
-const IP_ADDRESS_REGEX = /^(\d{1,3}\.){3}\d{1,3}$/;
+const IPV4_ADDRESS_REGEX = /^(\d{1,3}\.){3}\d{1,3}$/;
+const IPV6_HOST_REGEX = /^\[[\da-f:.]+\]$/i;
 
-function looksLikeIpAddress(value: string): boolean {
-  return IP_ADDRESS_REGEX.test(value);
+/**
+ * Checks whether a value is an IP address in the form a URL host carries it:
+ * a dotted IPv4 address, or a bracketed IPv6 literal such as `[::1]`.
+ */
+export function isIpAddress(value: string): boolean {
+  return IPV4_ADDRESS_REGEX.test(value) || IPV6_HOST_REGEX.test(value);
 }
 
 /**
@@ -55,7 +60,7 @@ export function isDnsCompatibleBucketName(bucket: string): boolean {
   if (!/^[a-z0-9.-]+$/.test(bucket)) {
     return false;
   }
-  if (looksLikeIpAddress(bucket)) {
+  if (isIpAddress(bucket)) {
     return false;
   }
   return true;

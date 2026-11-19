@@ -61,6 +61,69 @@ describe("endpoint builder", () => {
     expect(url.pathname).toBe("/my-bucket/photos/img.jpg");
   });
 
+  it("uses path-style addressing for dotted buckets over https", () => {
+    /* A wildcard certificate covers one label, so `my.bucket.s3.amazonaws.com`
+       fails TLS verification before the request is ever sent. */
+    const secure = buildRequestUrl({
+      endpoint: "https://s3.eu-west-1.amazonaws.com",
+      bucketStyle: "virtual",
+      bucket: "my.bucket",
+      key: "object.txt",
+    });
+    expect(secure.href).toBe("https://s3.eu-west-1.amazonaws.com/my.bucket/object.txt");
+
+    /* Plain http has no certificate to match, so the bucket stays in the host. */
+    const plain = buildRequestUrl({
+      endpoint: "http://storage.example.com",
+      bucketStyle: "virtual",
+      bucket: "my.bucket",
+      key: "object.txt",
+    });
+    expect(plain.href).toBe("http://my.bucket.storage.example.com/object.txt");
+  });
+
+  it("uses path-style addressing for IPv6 endpoints", () => {
+    /* `data.[::1]` is not a host, and the hostname setter drops it without a word. */
+    const url = buildRequestUrl({
+      endpoint: "http://[::1]:9000",
+      bucketStyle: "virtual",
+      bucket: "data",
+      key: "x.txt",
+    });
+
+    expect(url.href).toBe("http://[::1]:9000/data/x.txt");
+  });
+
+  it("refuses dot-segment buckets that URL parsing would remove", () => {
+    /* `/../victim/obj` normalizes to `/victim/obj`: the key's first segment would become the bucket. */
+    for (const bucketStyle of ["path", "virtual"] as const) {
+      for (const bucket of [".", ".."]) {
+        expect(() =>
+          buildRequestUrl({
+            endpoint: "https://store.example",
+            bucketStyle,
+            bucket,
+            key: "victim/obj",
+          }),
+        ).toThrow(/dot segment/i);
+      }
+    }
+  });
+
+  it("requires a bucket for virtual-hosted style only", () => {
+    const url = buildRequestUrl({
+      endpoint: "https://s3.amazonaws.com",
+      bucketStyle: "path",
+      key: "",
+    });
+    expect(url.href).toBe("https://s3.amazonaws.com/");
+
+    expect(() =>
+      // @ts-expect-error a virtual-hosted URL has nowhere to put a missing bucket
+      buildRequestUrl({ endpoint: "https://s3.amazonaws.com", bucketStyle: "virtual", key: "" }),
+    ).toThrow(/bucket is required/i);
+  });
+
   /*
    * A leading slash is part of the key, like any other byte. Stripping it wrote
    * `/foo` to `foo`, and turned the key `/` into a request for the bucket

@@ -1,11 +1,11 @@
 import type { BucketStyle } from "../../types.ts";
 import { uriEncode } from "../utils/encode.ts";
-import { isDnsCompatibleBucketName } from "../utils/is.ts";
+import { isDnsCompatibleBucketName, isIpAddress } from "../utils/is.ts";
 
 type EndpointStyle<T extends BucketStyle = BucketStyle> = T extends "virtual"
-  ? { bucket?: string; bucketStyle: "virtual" }
+  ? { bucket: string; bucketStyle: "virtual" }
   : T extends "path"
-    ? { bucket: string; bucketStyle: "path" }
+    ? { bucket?: string; bucketStyle: "path" }
     : never;
 
 export type EndpointInput<T extends BucketStyle = BucketStyle> = EndpointStyle<T> & {
@@ -17,21 +17,31 @@ export type EndpointInput<T extends BucketStyle = BucketStyle> = EndpointStyle<T
  * Builds a request URL for the given bucket/key combo respecting the desired
  * bucket addressing style.
  *
+ * Virtual-hosted style falls back to path style whenever the bucket cannot be
+ * reached as a subdomain of the endpoint: a name that is not DNS-compatible, a
+ * dotted name over `https:` (a wildcard certificate covers a single label), or
+ * an endpoint addressed by IP literal or as `localhost`.
+ *
+ * Throws on a bucket named `.` or `..`, which URL parsing removes from a path.
+ *
  * @param input - Endpoint components including style, bucket, and key.
  */
 export function buildRequestUrl<T extends BucketStyle>(input: EndpointInput<T>): URL {
   const { endpoint, bucketStyle, bucket, key } = input;
   const base = new URL(endpoint);
-  const effectiveStyle = resolveBucketStyle(bucketStyle, bucket, base.hostname);
 
-  if (!bucket && effectiveStyle !== "path") {
-    throw new Error("Bucket is required for virtual-hosted-style requests");
-  }
-
-  const finalBucketStyle = bucket ? effectiveStyle : "virtual";
-  if (bucket && finalBucketStyle === "virtual") {
+  if (!bucket) {
+    if (bucketStyle === "virtual") {
+      throw new Error("Bucket is required for virtual-hosted-style requests");
+    }
+  } else if (resolveBucketStyle(bucketStyle, bucket, base) === "virtual") {
     base.hostname = `${bucket}.${base.hostname}`;
-  } else if (bucket && finalBucketStyle === "path") {
+  } else {
+    if (DOT_SEGMENT.test(bucket)) {
+      throw new Error(
+        `Bucket ${JSON.stringify(bucket)} is a dot segment, which URL parsing removes instead of sending.`,
+      );
+    }
     const basePath = normalizeBasePath(base.pathname);
     base.pathname = `${basePath}/${encodeURIComponent(bucket)}`;
   }
@@ -86,32 +96,18 @@ function normalizeBasePath(pathname: string): string {
   return trimmed;
 }
 
-function resolveBucketStyle(
-  preferred: BucketStyle,
-  bucket: string | undefined,
-  hostname: string,
-): BucketStyle {
-  if (!bucket) {
-    return preferred;
-  }
-
-  if (preferred === "path") {
+function resolveBucketStyle(preferred: BucketStyle, bucket: string, base: URL): BucketStyle {
+  if (preferred === "path" || !isDnsCompatibleBucketName(bucket)) {
     return "path";
   }
 
-  if (!isDnsCompatibleBucketName(bucket)) {
+  if (base.protocol === "https:" && bucket.includes(".")) {
     return "path";
   }
 
-  if (looksLikeIpAddress(hostname) || hostname === "localhost") {
+  if (isIpAddress(base.hostname) || base.hostname === "localhost") {
     return "path";
   }
 
   return "virtual";
-}
-
-const IP_ADDRESS_REGEX = /^(\d{1,3}\.){3}\d{1,3}$/;
-
-function looksLikeIpAddress(value: string): boolean {
-  return IP_ADDRESS_REGEX.test(value);
 }
