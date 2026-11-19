@@ -116,10 +116,6 @@ export async function presignUrl(input: PresignInput): Promise<PresignResult> {
   const headers = cloneHeaders(input.headers);
   ensureHost(headers, input.url);
 
-  if (credentials.sessionToken) {
-    headers.set("x-amz-security-token", credentials.sessionToken);
-  }
-
   const payloadHash = await resolvePresignPayloadHash(input);
 
   const { canonical, signedHeaders } = canonicalizeHeaders(headers);
@@ -135,6 +131,10 @@ export async function presignUrl(input: PresignInput): Promise<PresignResult> {
   search.set("X-Amz-Expires", String(expires));
   search.set("X-Amz-SignedHeaders", signedHeaders);
 
+  /*
+   * The token travels in the query, where the signature covers it, and never as
+   * a signed header: whoever uses a presigned URL sends the URL and nothing else.
+   */
   if (credentials.sessionToken) {
     search.set("X-Amz-Security-Token", credentials.sessionToken);
   }

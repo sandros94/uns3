@@ -239,6 +239,28 @@ describe("request bytes", () => {
   });
 
   /*
+   * A presigned URL is handed to someone who sends nothing but the URL: a
+   * browser, an `<img>`, `curl`. Everything the signature covers beyond `host`
+   * therefore has to travel in the query, or the request that arrives is not
+   * the one that was signed.
+   */
+  describe("presigned URLs", () => {
+    it("carries a session token in the query only", async () => {
+      const client = new S3Client({
+        region: "us-east-1",
+        endpoint: "https://s3.us-east-1.amazonaws.com",
+        credentials: { ...credentials, sessionToken: "FQoGZXIvYXdzEXAMPLE//+token==" },
+      });
+
+      const url = new URL(await client.getSignedUrl({ method: "GET", bucket: BUCKET, key: "k" }));
+
+      expect(url.searchParams.get("X-Amz-Security-Token")).toBe("FQoGZXIvYXdzEXAMPLE//+token==");
+      expect(url.searchParams.get("X-Amz-SignedHeaders")).toBe("host");
+      expect(signatureMatches(new Request(url))).toBe(true);
+    });
+  });
+
+  /*
    * A key is bytes; a URL path is not. See `test/core/endpoint.test.ts` for the
    * whole story — here the only question is whether the client refuses before it
    * writes somewhere the caller never named.
@@ -353,19 +375,33 @@ function streamOf(text: string): ReadableStream<Uint8Array> {
  * re-encodes, and derives the signature with an independent HMAC. If the client
  * signs one query and sends another, the two signatures differ and this returns
  * false — exactly as a store would.
+ *
+ * A request without an `Authorization` header is read as a presigned URL: the
+ * signing parameters come from the query, `X-Amz-Signature` is left out of the
+ * canonical query, and the payload is `UNSIGNED-PAYLOAD`.
  */
 function signatureMatches(request: Request): boolean {
+  const url = new URL(request.url);
   const auth = request.headers.get("authorization");
-  if (!auth) return false;
+  const presigned = !auth;
 
-  const credential = /Credential=([^,]+)/.exec(auth)?.[1];
-  const signedHeaders = /SignedHeaders=([^,]+)/.exec(auth)?.[1];
-  const signature = /Signature=([\da-f]+)/.exec(auth)?.[1];
+  const credential = presigned
+    ? url.searchParams.get("X-Amz-Credential")
+    : /Credential=([^,]+)/.exec(auth)?.[1];
+  const signedHeaders = presigned
+    ? url.searchParams.get("X-Amz-SignedHeaders")
+    : /SignedHeaders=([^,]+)/.exec(auth)?.[1];
+  const signature = presigned
+    ? url.searchParams.get("X-Amz-Signature")
+    : /Signature=([\da-f]+)/.exec(auth)?.[1];
+  const amzDate = presigned
+    ? url.searchParams.get("X-Amz-Date")
+    : request.headers.get("x-amz-date");
+  const payloadHash = presigned ? "UNSIGNED-PAYLOAD" : request.headers.get("x-amz-content-sha256");
   if (!credential || !signedHeaders || !signature) return false;
 
   const scope = credential.slice(credential.indexOf("/") + 1);
   const [shortDate, region, service] = scope.split("/");
-  const url = new URL(request.url);
 
   const canonicalUri = url.pathname
     .split("/")
@@ -380,15 +416,15 @@ function signatureMatches(request: Request): boolean {
   const canonicalRequest = [
     request.method,
     canonicalUri,
-    canonicalQuery(url.search),
+    canonicalQuery(url.search, presigned ? "X-Amz-Signature" : undefined),
     `${canonicalHeaders}\n`,
     signedHeaders,
-    request.headers.get("x-amz-content-sha256") ?? "",
+    payloadHash ?? "",
   ].join("\n");
 
   const stringToSign = [
     "AWS4-HMAC-SHA256",
-    request.headers.get("x-amz-date") ?? "",
+    amzDate ?? "",
     scope,
     createHash("sha256").update(canonicalRequest, "utf8").digest("hex"),
   ].join("\n");
@@ -410,7 +446,7 @@ function headerOf(request: Request, name: string): string {
   return name === "host" ? new URL(request.url).host : "";
 }
 
-function canonicalQuery(search: string): string {
+function canonicalQuery(search: string, exclude?: string): string {
   const raw = search.startsWith("?") ? search.slice(1) : search;
   if (!raw) return "";
   return raw
@@ -421,6 +457,7 @@ function canonicalQuery(search: string): string {
       const value = separator === -1 ? "" : pair.slice(separator + 1);
       return { key: decodeURIComponent(key), value: decodeURIComponent(value) };
     })
+    .filter((entry) => entry.key !== exclude)
     .sort((a, b) => (a.key === b.key ? compare(a.value, b.value) : compare(a.key, b.key)))
     .map((entry) => `${rfc3986(entry.key)}=${rfc3986(entry.value)}`)
     .join("&");
