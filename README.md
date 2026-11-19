@@ -166,7 +166,7 @@ await client.put({
 });
 ```
 
-The value is signed along with the rest of the request, so it has to be the real byte length: too small and the store rejects the signature or the body, too large and the connection waits for bytes that never arrive and fails as a bare `fetch failed`. Neither is retried, because a PUT is not idempotent. `uploadPart()` takes the same option, for the same reason.
+The value is signed along with the rest of the request, so it has to be the real byte length: too small and the store rejects the signature or the body, too large and the connection waits for bytes that never arrive and fails as a bare `fetch failed`. `uploadPart()` takes the same option, for the same reason.
 
 **Object keys**
 
@@ -333,6 +333,24 @@ await client.abortMultipart({
   key: "large-video.mp4",
 });
 ```
+
+### Retries
+
+A request that fails transiently is sent again: a `429`, a `5xx` other than `501` and `505`, a throttling or timeout error code, or a failure in transit. Any operation qualifies as long as its body can be sent a second time, which is every body except a `ReadableStream`. The delay doubles on each attempt, with jitter, and a `Retry-After` from the store is honored.
+
+```typescript
+const client = new S3Client({
+  endpoint: "https://s3.us-east-1.amazonaws.com",
+  retry: {
+    maxAttempts: 5, // the initial request included, defaults to 3
+    baseDelayMs: 200, // defaults to 100
+    // Replaces the default decision entirely
+    retriable: (response, error) => response === undefined || response.status >= 500,
+  },
+});
+```
+
+Aborting the request's `signal` stops it at once, with the signal's own reason, and is never retried.
 
 ## Development
 

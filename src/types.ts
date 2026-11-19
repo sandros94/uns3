@@ -50,21 +50,22 @@ export interface ConditionalHeaders {
  * ```
  */
 export interface RetryConfig {
-  /** Maximum number of attempts (including the initial request). */
-  maxAttempts: number;
-  /** Base delay in milliseconds between retries; doubled on each subsequent attempt. */
-  baseDelayMs: number;
-  /** When `true`, adds random jitter to the retry delay to reduce thundering-herd effects. */
+  /** Maximum number of attempts, the initial request included. A positive integer, defaults to `3`. */
+  maxAttempts?: number;
+  /** Base delay in milliseconds between retries, doubled on each subsequent attempt. Defaults to `100`. */
+  baseDelayMs?: number;
+  /** When `true` (the default), adds random jitter to the retry delay to reduce thundering-herd effects. */
   jitter?: boolean;
   /**
    * Custom predicate to decide whether a failed request should be retried.
-   * Receives the response (if any) and the thrown error.
+   * Receives the response (if any) and the thrown error, once per failed
+   * attempt.
    *
-   * It is the decision, not a filter on it: the default rule — retry only
-   * `GET` and `HEAD`, because the rest are not idempotent — is replaced by
-   * whatever this returns, so a predicate can also ask for a `PUT` to be
-   * repeated. The body is re-sent as given, which is fine for a string, a
-   * buffer or a `Blob`; a `ReadableStream` body is consumed by the first
+   * It is the decision, not a filter on it: the default rule — retry a
+   * `429`, a `5xx` other than `501` and `505`, a throttling or timeout
+   * error code, and a request that failed in transit — is replaced by whatever
+   * this returns. The body is re-sent as given, which is fine for a string, a
+   * buffer or a `Blob`. A `ReadableStream` body is consumed by the first
    * attempt and is never retried whatever this returns, since there is nothing
    * left to send. A predicate that throws is read as `false`.
    */
@@ -191,8 +192,7 @@ export interface PutObjectParams
    * The header is signed with the rest of the request, so a wrong value is not
    * a wrong number: too small and the store rejects the signature or the body,
    * too large and the connection waits for bytes that never come and surfaces
-   * as a bare `fetch failed`. Neither is retried, because a `PUT` is not
-   * idempotent. Pass the body's byte length or leave it out.
+   * as a bare `fetch failed`. Pass the body's byte length or leave it out.
    */
   contentLength?: number;
   /** Explicit MIME type. Set to `false` to suppress automatic detection. */
@@ -249,8 +249,7 @@ export interface UploadPartParams extends BaseRequest {
    * The header is signed with the rest of the request, so a wrong value is not
    * a wrong number: too small and the store rejects the signature or the body,
    * too large and the connection waits for bytes that never come and surfaces
-   * as a bare `fetch failed`. Neither is retried, because a `PUT` is not
-   * idempotent. Pass the body's byte length or leave it out.
+   * as a bare `fetch failed`. Pass the body's byte length or leave it out.
    */
   contentLength?: number;
 }

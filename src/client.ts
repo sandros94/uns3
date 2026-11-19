@@ -57,7 +57,7 @@ interface PerformContext {
   signal?: AbortSignal;
 }
 
-const DEFAULT_RETRY_CONFIG: RetryConfig = {
+const DEFAULT_RETRY_CONFIG: Required<Omit<RetryConfig, "retriable">> = {
   maxAttempts: 3,
   baseDelayMs: 100,
   jitter: true,
@@ -86,7 +86,8 @@ export class S3Client {
   private readonly contentTypeResolver: ContentTypeResolver;
   private readonly checksumConfig: ChecksumConfig;
   private clockSkewMs: number;
-  private readonly retryConfig: RetryConfig;
+  private readonly retryConfig: Required<Omit<RetryConfig, "retriable">> &
+    Pick<RetryConfig, "retriable">;
 
   /**
    * Creates a new client instance.
@@ -102,14 +103,7 @@ export class S3Client {
     this.fetcher = config.fetch ?? globalFetch() ?? missingFetch();
     this.contentTypeResolver = config.contentTypeResolver ?? defaultContentTypeResolver;
     this.checksumConfig = config.checksum ? { ...config.checksum } : { algorithm: "none" };
-    const retry = config.retry
-      ? { ...DEFAULT_RETRY_CONFIG, ...config.retry }
-      : { ...DEFAULT_RETRY_CONFIG };
-    this.retryConfig = {
-      ...retry,
-      maxAttempts: Math.max(1, retry.maxAttempts),
-      baseDelayMs: Math.max(0, retry.baseDelayMs),
-    };
+    this.retryConfig = normalizeRetryConfig(config.retry);
     this.clockSkewMs = normalizeClockSkew(config.clockSkewMs ?? 0);
   }
 
@@ -180,9 +174,8 @@ export class S3Client {
    * MissingContentLength`, while a declared length is sent fixed-length
    * instead. It is signed along with everything else, so a value that does not
    * match the body is not a rounding error: the request is either rejected for
-   * a bad signature or hangs and surfaces as a bare `fetch failed`, and neither
-   * is retried, because a PUT is not idempotent. Pass the byte length of the
-   * body or nothing at all.
+   * a bad signature or hangs and surfaces as a bare `fetch failed`. Pass the
+   * byte length of the body or nothing at all.
    *
    * @param params - Upload configuration including payload and metadata.
    * @example
@@ -411,8 +404,7 @@ export class S3Client {
    * `Content-Length`, and it is signed along with everything else. A value that
    * does not match the body is therefore not a rounding error: the request is
    * either rejected for a bad signature or hangs and surfaces as a bare
-   * `fetch failed`, and neither is retried, because a PUT is not idempotent.
-   * Pass the byte length of the body or nothing at all.
+   * `fetch failed`. Pass the byte length of the body or nothing at all.
    *
    * @param params - Part upload options including uploadId, partNumber, and body.
    * @example
@@ -652,7 +644,7 @@ export class S3Client {
      */
     finalizeQuery(context.url);
     const streamedBody = hasBody(context.method) && isPayloadStream(context.body ?? null);
-    const maxAttempts = Math.max(1, this.retryConfig.maxAttempts);
+    const { maxAttempts } = this.retryConfig;
 
     for (let attempt = 1; ; attempt += 1) {
       let headers = context.headers;
@@ -723,9 +715,7 @@ export class S3Client {
        */
       context.signal?.throwIfAborted();
 
-      if (
-        !this.shouldRetry(context.method, streamedBody, response, failure, attempt, maxAttempts)
-      ) {
+      if (!this.shouldRetry(streamedBody, response, failure, attempt, maxAttempts)) {
         throw failure;
       }
 
@@ -856,7 +846,6 @@ export class S3Client {
   }
 
   private shouldRetry(
-    method: Methods,
     bodyIsStream: boolean,
     response: Response | undefined,
     error: unknown,
@@ -887,21 +876,16 @@ export class S3Client {
       }
     }
 
-    if (!isRetryEligibleMethod(method)) {
-      return false;
-    }
-
+    /*
+     * Eligibility is about the body, not the method: every operation the
+     * client issues is safe to repeat once its body can be sent again, which
+     * the stream check above already settled. What remains is whether the
+     * failure is transient — a response says so through its status and code,
+     * and a request that never got one failed in transit.
+     */
     if (response) {
-      if (error instanceof S3Error && error.retriable) {
-        return true;
-      }
-      return isRetriableStatus(response.status);
+      return error instanceof S3Error ? error.retriable : isRetriableStatus(response.status);
     }
-
-    if (error instanceof S3Error) {
-      return error.retriable ?? false;
-    }
-
     return true;
   }
 
@@ -1167,16 +1151,28 @@ function parseRetryAfterHeader(value: string | null): number | undefined {
   return deltaSeconds > 0 ? deltaSeconds : undefined;
 }
 
+function normalizeRetryConfig(
+  retry: RetryConfig | undefined,
+): Required<Omit<RetryConfig, "retriable">> & Pick<RetryConfig, "retriable"> {
+  const merged = { ...DEFAULT_RETRY_CONFIG, ...retry };
+  if (!Number.isSafeInteger(merged.maxAttempts) || merged.maxAttempts < 1) {
+    throw new RangeError(
+      `retry.maxAttempts must be a positive integer, got ${String(merged.maxAttempts)}.`,
+    );
+  }
+  if (!Number.isFinite(merged.baseDelayMs) || merged.baseDelayMs < 0) {
+    throw new RangeError(
+      `retry.baseDelayMs must be a finite number of zero or more, got ${String(merged.baseDelayMs)}.`,
+    );
+  }
+  return merged;
+}
+
 function normalizeClockSkew(skew: number): number {
   if (!Number.isFinite(skew)) {
     return 0;
   }
   return skew;
-}
-
-function isRetryEligibleMethod(method: Methods): boolean {
-  const upper = method.toUpperCase();
-  return upper === "GET" || upper === "HEAD";
 }
 
 function isRetriableStatus(status: number): boolean {

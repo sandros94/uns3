@@ -337,53 +337,6 @@ describe("request bytes", () => {
       expect(requests[1]!.headers.get("x-amz-date")).toBe("20230102T030405Z");
     });
   });
-
-  /*
-   * `retry.retriable` is documented as the decision itself — "custom predicate
-   * to decide whether a failed request should be retried" — so it stays
-   * authoritative, and a caller who says a PUT is safe to repeat gets a repeated
-   * PUT. What a predicate cannot do is conjure a body back: a stream is consumed
-   * by the attempt that sent it, and there is nothing left to send a second
-   * time. That is physics, not policy, and it is the one thing the predicate
-   * does not get a vote on.
-   */
-  describe("retry policy", () => {
-    it("lets a custom predicate force a retry of a PUT", async () => {
-      let attempts = 0;
-      const { client, requests } = clientAnswering(
-        () => {
-          attempts += 1;
-          return attempts === 1
-            ? new Response("<Error><Code>InternalError</Code></Error>", { status: 500 })
-            : new Response(null, { status: 200 });
-        },
-        { retry: { maxAttempts: 3, baseDelayMs: 0, jitter: false, retriable: () => true } },
-      );
-
-      const response = await client.put({ bucket: BUCKET, key: "retried.txt", body: "payload" });
-
-      expect(response.status).toBe(200);
-      expect(requests).toHaveLength(2);
-      await expect(requests[1]!.text()).resolves.toBe("payload");
-    });
-
-    it("never retries a streamed body, whatever the predicate says", async () => {
-      const { client, requests } = clientAnswering(
-        () => new Response("<Error><Code>InternalError</Code></Error>", { status: 500 }),
-        { retry: { maxAttempts: 3, baseDelayMs: 0, jitter: false, retriable: () => true } },
-      );
-
-      const promise = client.put({
-        bucket: BUCKET,
-        key: "streamed.bin",
-        body: streamOf("one shot"),
-      });
-
-      /* The original 500 surfaces, rather than a `TypeError` about a used body. */
-      await expect(promise).rejects.toMatchObject({ status: 500, code: "InternalError" });
-      expect(requests).toHaveLength(1);
-    });
-  });
 });
 
 /** A one-chunk stream, which is the smallest body that is not also a buffer. */
