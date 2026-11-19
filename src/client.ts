@@ -469,7 +469,7 @@ export class S3Client {
     });
 
     const etagHeader = response.headers.get("etag");
-    response.body?.cancel?.();
+    discardBody(response);
 
     if (!etagHeader) {
       throw new Error("ETag header missing from UploadPart response.");
@@ -582,7 +582,7 @@ export class S3Client {
       signal: params.signal,
     });
 
-    response.body?.cancel?.();
+    discardBody(response);
   }
 
   private async execute(
@@ -653,12 +653,8 @@ export class S3Client {
     finalizeQuery(context.url);
     const streamedBody = hasBody(context.method) && isPayloadStream(context.body ?? null);
     const maxAttempts = Math.max(1, this.retryConfig.maxAttempts);
-    let attempt = 0;
-    let lastError: unknown;
 
-    while (attempt < maxAttempts) {
-      attempt += 1;
-
+    for (let attempt = 1; ; attempt += 1) {
       let headers = context.headers;
 
       if (credentials) {
@@ -696,8 +692,16 @@ export class S3Client {
 
       const request = new Request(context.url.toString(), init);
 
+      /*
+       * One attempt ends in exactly one of two ways: a response the caller
+       * expected, or a failure — an unexpected response turned into an
+       * `S3Error`, or whatever the transport threw. The retry decision is made
+       * once, below, about that one failure.
+       */
+      let response: Response | undefined;
+      let failure: unknown;
       try {
-        const { response } = await send({ request, signal: context.signal }, this.fetcher);
+        ({ response } = await send({ request, signal: context.signal }, this.fetcher));
 
         this.updateClockSkew(response);
 
@@ -705,35 +709,29 @@ export class S3Client {
           return response;
         }
 
-        const error = await createError(response);
-        if (!response.bodyUsed) {
-          response.body?.cancel?.();
-        }
-
-        if (
-          !this.shouldRetry(context.method, streamedBody, response, error, attempt, maxAttempts)
-        ) {
-          throw error;
-        }
-
-        lastError = error;
+        failure = await createError(response);
+        discardBody(response);
       } catch (error) {
-        if (isAbortError(error)) {
-          throw error;
-        }
+        failure = error;
+      }
 
-        if (
-          !this.shouldRetry(context.method, streamedBody, undefined, error, attempt, maxAttempts)
-        ) {
-          throw ensureError(error);
-        }
+      /*
+       * The caller's signal is the only abort that ends the request outright,
+       * and it ends it with the caller's own reason, whatever that is. An abort
+       * the transport raised for its own reasons is a failed attempt like any
+       * other.
+       */
+      context.signal?.throwIfAborted();
 
-        lastError = error;
+      if (
+        !this.shouldRetry(context.method, streamedBody, response, failure, attempt, maxAttempts)
+      ) {
+        throw failure;
       }
 
       let delayMs = this.computeBackoffDelay(attempt);
-      if (lastError instanceof S3Error && typeof lastError.retryAfter === "number") {
-        const retryDelay = Math.ceil(lastError.retryAfter * 1000);
+      if (failure instanceof S3Error && typeof failure.retryAfter === "number") {
+        const retryDelay = Math.ceil(failure.retryAfter * 1000);
         if (retryDelay > delayMs) {
           delayMs = retryDelay;
         }
@@ -742,8 +740,6 @@ export class S3Client {
         await this.delay(delayMs, context.signal);
       }
     }
-
-    throw ensureError(lastError ?? new Error("Request failed after exhausting retry attempts."));
   }
 
   private resolveBucket(bucket: string | undefined): string {
@@ -939,7 +935,7 @@ export class S3Client {
 
     await new Promise<void>((resolve, reject) => {
       if (abortSignal.aborted) {
-        reject(ensureError(abortSignal.reason ?? new Error("Aborted")));
+        reject(abortSignal.reason);
         return;
       }
 
@@ -950,7 +946,7 @@ export class S3Client {
 
       function onAbort(): void {
         cleanup();
-        reject(ensureError(abortSignal.reason ?? new Error("Aborted")));
+        reject(abortSignal.reason);
       }
 
       const timer = setTimeout(() => {
@@ -1190,27 +1186,13 @@ function isRetriableStatus(status: number): boolean {
   return status >= 500 && status !== 501 && status !== 505;
 }
 
-function ensureError(error: unknown): Error {
-  if (error instanceof Error) {
-    return error;
-  }
-  if (error && typeof error === "object" && "message" in error) {
-    return new Error(String((error as { message?: unknown }).message));
-  }
-  return new Error(String(error ?? "Unknown error"));
-}
-
-function isAbortError(error: unknown): boolean {
-  if (!error) {
-    return false;
-  }
-  if (typeof DOMException !== "undefined" && error instanceof DOMException) {
-    return error.name === "AbortError";
-  }
-  if (error instanceof Error) {
-    return error.name === "AbortError";
-  }
-  return false;
+/**
+ * Releases a response body nobody will read. A cancel that fails has nothing
+ * left to clean up, so its rejection is dropped rather than left unhandled.
+ */
+function discardBody(response: Response): void {
+  if (response.bodyUsed) return;
+  response.body?.cancel().catch(() => {});
 }
 
 function matchesExpected(status: number, expected: number | number[]): boolean {
