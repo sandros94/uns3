@@ -54,6 +54,11 @@ export interface RetryConfig {
   maxAttempts?: number;
   /** Base delay in milliseconds between retries, doubled on each subsequent attempt. Defaults to `100`. */
   baseDelayMs?: number;
+  /**
+   * Longest delay in milliseconds between two attempts, a `Retry-After` from
+   * the store included. Defaults to `20000`.
+   */
+  maxDelayMs?: number;
   /** When `true` (the default), adds random jitter to the retry delay to reduce thundering-herd effects. */
   jitter?: boolean;
   /**
@@ -125,6 +130,13 @@ export interface S3ClientConfig {
   clockSkewMs?: number;
   /** Retry configuration for transient failures. */
   retry?: RetryConfig;
+  /**
+   * Deadline in milliseconds of each attempt that moves no object bytes
+   * (`head`, `del`, `list` and the multipart calls but `uploadPart`), up to
+   * the end of its response. Also bounds reading an error body, whatever the
+   * request. `false` disables it. Defaults to `30000`.
+   */
+  timeoutMs?: number | false;
   /** Checksum configuration for request body integrity. */
   checksum?: ChecksumConfig;
 }
@@ -148,8 +160,16 @@ export interface BaseRequest {
    * alone makes a `304` an error. Ignored by `getSignedUrl`, which sends nothing.
    */
   expectedStatus?: number | number[];
-  /** Abort signal to cancel the request. */
+  /** Abort signal to cancel the request, retries included. */
   signal?: AbortSignal;
+  /**
+   * Deadline in milliseconds of each attempt, up to the response it is
+   * answered with. A timed-out attempt is retried like any failed one.
+   * Replaces the client's `timeoutMs` for this request. `get`, `put` and
+   * `uploadPart` have no deadline unless one is set here, since a large
+   * transfer has no honest default. `false` disables it.
+   */
+  timeoutMs?: number | false;
 }
 
 /** Parameters for requests that operate on a single object, including conditional and range headers. */

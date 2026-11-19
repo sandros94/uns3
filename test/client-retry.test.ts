@@ -181,6 +181,122 @@ describe("aborting", () => {
 });
 
 /** A body that sends `head`, then never ends until the signal aborts it. */
+/*
+ * Nothing waits forever. A request that moves no object bytes has a deadline
+ * per attempt, an error body has one whatever the request, and no delay
+ * between attempts outlasts `maxDelayMs`, whatever the store asks for. A
+ * request that moves object bytes (`get`, `put`, `uploadPart`) has no default
+ * deadline, since a large transfer has no honest one, but takes `timeoutMs`.
+ */
+describe("deadlines", () => {
+  const never = (): Promise<Response> => new Promise<Response>(() => {});
+
+  it("times out and retries a request that moves no object bytes", async () => {
+    const { client, requests } = clientAnswering(never, {
+      timeoutMs: 20,
+      retry: { maxAttempts: 2, baseDelayMs: 0 },
+    });
+
+    await expect(client.head({ bucket: BUCKET, key: "a.txt" })).rejects.toMatchObject({
+      name: "TimeoutError",
+    });
+    expect(requests).toHaveLength(2);
+  });
+
+  it("gives a request that moves object bytes no default deadline", async () => {
+    const controller = new AbortController();
+    const { client } = clientAnswering(never, { timeoutMs: 20 });
+
+    const pending = client.get({ bucket: BUCKET, key: "a.txt", signal: controller.signal });
+    const outcome = await Promise.race([
+      pending.then(
+        () => "settled",
+        () => "settled",
+      ),
+      new Promise((resolve) => setTimeout(resolve, 60, "pending")),
+    ]);
+    controller.abort();
+    await pending.catch(() => {});
+
+    expect(outcome).toBe("pending");
+  });
+
+  it("bounds an attempt to its response, never the body read after it", async () => {
+    const { client } = clientAnswering((request) => new Response(lateBody("late", request.signal)));
+
+    const response = await client.get({ bucket: BUCKET, key: "a.txt", timeoutMs: 20 });
+
+    await expect(response.text()).resolves.toBe("late");
+  });
+
+  it("bounds an error body that never ends", async () => {
+    const { client } = clientAnswering(
+      (request) =>
+        new Response(endlessBody("<Error><Code>AccessDenied</Code>", request.signal), {
+          status: 403,
+        }),
+      { timeoutMs: 20 },
+    );
+
+    await expect(client.put({ bucket: BUCKET, key: "a.txt", body: "x" })).rejects.toMatchObject({
+      status: 403,
+    });
+  });
+
+  it("caps a Retry-After at maxDelayMs", async () => {
+    let attempts = 0;
+    const { client, requests } = clientAnswering(
+      () =>
+        ++attempts === 1
+          ? new Response(null, { status: 503, headers: { "retry-after": "86400" } })
+          : new Response("ok"),
+      { retry: { maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 10 } },
+    );
+
+    await client.get({ bucket: BUCKET, key: "a.txt" });
+
+    expect(requests).toHaveLength(2);
+  });
+
+  it.each([
+    [{ "retry-after": "1e6" }, undefined],
+    [{ "retry-after": "0x10" }, undefined],
+    [{ "retry-after": "120" }, 120],
+    [{ "x-amz-retry-after": "1500" }, 1.5],
+  ])("reads %j as a retryAfter of %s seconds", async (headers, retryAfter) => {
+    const { client } = clientAnswering(() => new Response(null, { status: 503, headers }));
+
+    await expect(client.head({ bucket: BUCKET, key: "a.txt" })).rejects.toMatchObject({
+      retryAfter,
+    });
+  });
+
+  it.each([0, -1, Number.NaN, Infinity, 2 ** 31])("refuses timeoutMs %s", (timeoutMs) => {
+    expect(() => new S3Client({ endpoint: "https://s3.example.com", timeoutMs })).toThrow(
+      RangeError,
+    );
+  });
+
+  it.each([-1, Number.NaN, Infinity, 2 ** 31])("refuses maxDelayMs %s", (maxDelayMs) => {
+    expect(
+      () => new S3Client({ endpoint: "https://s3.example.com", retry: { maxDelayMs } }),
+    ).toThrow(RangeError);
+  });
+});
+
+/** A body that arrives in full, 50ms after the response did. */
+function lateBody(text: string, signal: AbortSignal): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+      setTimeout(() => {
+        controller.enqueue(new TextEncoder().encode(text));
+        controller.close();
+      }, 50);
+    },
+  });
+}
+
 function endlessBody(head: string, signal: AbortSignal): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
     start(controller) {

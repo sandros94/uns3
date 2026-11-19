@@ -334,7 +334,7 @@ await client.abortMultipart({
 });
 ```
 
-### Retries
+### Retries and timeouts
 
 A request that fails transiently is sent again: a `429`, a `5xx` other than `501` and `505`, a throttling or timeout error code, or a failure in transit. Any operation qualifies as long as its body can be sent a second time, which is every body except a `ReadableStream`. The delay doubles on each attempt, with jitter, and a `Retry-After` from the store is honored.
 
@@ -344,10 +344,17 @@ const client = new S3Client({
   retry: {
     maxAttempts: 5, // the initial request included, defaults to 3
     baseDelayMs: 200, // defaults to 100
+    maxDelayMs: 10_000, // caps every delay, Retry-After included, defaults to 20000
     // Replaces the default decision entirely
     retriable: (response, error) => response === undefined || response.status >= 500,
   },
 });
+```
+
+Every attempt of a request that moves no object bytes (`head`, `del`, `list` and the multipart calls but `uploadPart`) has a deadline, `timeoutMs` on the client, 30 seconds by default. A timed-out attempt is retried like any failed one. `get`, `put` and `uploadPart` have no default deadline, since a large transfer has no honest one, but take `timeoutMs` per request. The deadline ends at the response, so it never cuts off a body you are still reading. An error body is always read within the client's `timeoutMs`.
+
+```typescript
+await client.get({ key: "big.bin", timeoutMs: 5_000 }); // per attempt, until the response arrives
 ```
 
 Aborting the request's `signal` stops it at once, with the signal's own reason, and is never retried.

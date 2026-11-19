@@ -25,6 +25,7 @@ import type {
   ListObjectsV2Response,
   MultipartInitParams,
   MultipartInitResult,
+  BaseRequest,
   ObjectRequest,
   PresignParams,
   PutObjectParams,
@@ -38,6 +39,8 @@ import { S3Error } from "./error.ts";
 import { isPlainObject } from "./utils.ts";
 
 interface RequestOptions {
+  /** Whether the request moves object bytes, which gives it no default deadline. */
+  movesBytes: boolean;
   body?: BodyInit | ReadableStream<Uint8Array> | null;
   contentLength?: number;
   contentType?: string;
@@ -56,13 +59,22 @@ interface PerformContext {
   key: string | undefined;
   expectedStatus: number | number[];
   signal?: AbortSignal;
+  /** The deadline of each attempt, up to the response it is answered with. */
+  timeoutMs: number | false;
 }
 
 const DEFAULT_RETRY_CONFIG: Required<Omit<RetryConfig, "retriable">> = {
   maxAttempts: 3,
   baseDelayMs: 100,
+  maxDelayMs: 20_000,
   jitter: true,
 };
+
+/** The default deadline of an attempt that moves no object bytes, and of reading an error body. */
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+/** The longest delay `setTimeout` keeps: anything larger fires at once. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 
 const MAX_INLINE_CHECKSUM_BYTES = 16 * 1024 * 1024;
 
@@ -87,6 +99,7 @@ export class S3Client {
   private readonly contentTypeResolver: ContentTypeResolver;
   private readonly checksumConfig: ChecksumConfig;
   private clockSkewMs: number;
+  private readonly timeoutMs: number | false;
   private readonly retryConfig: Required<Omit<RetryConfig, "retriable">> &
     Pick<RetryConfig, "retriable">;
 
@@ -105,6 +118,7 @@ export class S3Client {
     this.contentTypeResolver = config.contentTypeResolver ?? defaultContentTypeResolver;
     this.checksumConfig = config.checksum ? { ...config.checksum } : { algorithm: "none" };
     this.retryConfig = normalizeRetryConfig(config.retry);
+    this.timeoutMs = normalizeTimeout(config.timeoutMs ?? DEFAULT_TIMEOUT_MS, "timeoutMs");
     this.clockSkewMs = normalizeClockSkew(config.clockSkewMs ?? 0);
   }
 
@@ -130,6 +144,7 @@ export class S3Client {
    */
   async get(params: GetObjectParams): Promise<Response> {
     return await this.execute("GET", params, {
+      movesBytes: true,
       expectedStatus: params.expectedStatus ?? [200, 206, 304],
     });
   }
@@ -154,6 +169,7 @@ export class S3Client {
    */
   async head(params: HeadObjectParams): Promise<Response> {
     return await this.execute("HEAD", params, {
+      movesBytes: false,
       expectedStatus: params.expectedStatus ?? [200, 206, 304],
     });
   }
@@ -203,6 +219,7 @@ export class S3Client {
       this.contentTypeResolver,
     );
     return await this.execute("PUT", params, {
+      movesBytes: true,
       body,
       contentLength: params.contentLength,
       contentType: resolvedContentType,
@@ -225,6 +242,7 @@ export class S3Client {
    */
   async del(params: DeleteObjectParams): Promise<Response> {
     return await this.execute("DELETE", params, {
+      movesBytes: false,
       expectedStatus: params.expectedStatus ?? [200, 204],
     });
   }
@@ -283,6 +301,7 @@ export class S3Client {
         key: undefined,
         expectedStatus: params.expectedStatus ?? 200,
         signal: params.signal,
+        timeoutMs: this.deadline(params, false),
       },
       "ListBucketResult",
     );
@@ -382,6 +401,7 @@ export class S3Client {
         key,
         expectedStatus: params.expectedStatus ?? 200,
         signal: params.signal,
+        timeoutMs: this.deadline(params, false),
       },
       "InitiateMultipartUploadResult",
       (text) => extractTag(text, "UploadId") || undefined,
@@ -458,6 +478,7 @@ export class S3Client {
       key,
       expectedStatus: params.expectedStatus ?? 200,
       signal: params.signal,
+      timeoutMs: this.deadline(params, true),
     });
 
     const etagHeader = response.headers.get("etag");
@@ -536,6 +557,7 @@ export class S3Client {
         key,
         expectedStatus: params.expectedStatus ?? 200,
         signal: params.signal,
+        timeoutMs: this.deadline(params, false),
       },
       "CompleteMultipartUploadResult",
       (text) => {
@@ -587,6 +609,7 @@ export class S3Client {
       // TODO: study if this should also support 412
       expectedStatus: params.expectedStatus ?? [200, 202, 204],
       signal: params.signal,
+      timeoutMs: this.deadline(params, false),
     });
 
     discardBody(response);
@@ -643,9 +666,22 @@ export class S3Client {
       key,
       expectedStatus: options.expectedStatus,
       signal: params.signal,
+      timeoutMs: this.deadline(params, options.movesBytes),
     });
 
     return response;
+  }
+
+  /**
+   * The deadline of each attempt of a request. One that moves object bytes has
+   * none unless the caller sets one, since a large transfer has no honest
+   * default. Every other request gets the client's.
+   */
+  private deadline(params: BaseRequest, movesBytes: boolean): number | false {
+    if (params.timeoutMs !== undefined) {
+      return normalizeTimeout(params.timeoutMs, "timeoutMs");
+    }
+    return movesBytes ? false : this.timeoutMs;
   }
 
   private async perform(context: PerformContext): Promise<Response> {
@@ -713,6 +749,7 @@ export class S3Client {
 
     for (let attempt = 1; ; attempt += 1) {
       let headers = context.headers;
+      const abort = attemptAbort(context.signal);
 
       if (credentials) {
         const result = await signRequest({
@@ -732,7 +769,7 @@ export class S3Client {
         method: context.method,
         headers,
         body: hasBody(context.method) ? (context.body ?? null) : undefined,
-        signal: context.signal,
+        signal: abort.signal,
         /*
          * A redirect is never followed. Following one sends the request to a
          * host it was not signed for, stripped of its `Authorization`, and the
@@ -764,19 +801,29 @@ export class S3Client {
       let response: Response | undefined;
       let failure: unknown;
       try {
-        ({ response } = await send({ request, signal: context.signal }, this.fetcher));
+        abort.arm(context.timeoutMs);
+        ({ response } = await send({ request, signal: abort.signal }, this.fetcher));
 
         this.updateClockSkew(response);
 
         if (matchesExpected(response.status, context.expectedStatus)) {
-          return await read(response);
+          const value = await read(response);
+          /*
+           * The deadline stops at the response. A body the caller reads later
+           * is theirs to bound, and only their own signal still reaches it.
+           */
+          abort.disarm();
+          return value;
         }
 
+        /* An error body is bounded whatever the request, since nobody else reads it. */
+        if (!abort.armed) abort.arm(this.timeoutMs);
         failure = await createError(response);
         discardBody(response);
       } catch (error) {
         failure = error;
       }
+      abort.release();
 
       /*
        * The caller's signal is the only abort that ends the request outright,
@@ -792,11 +839,9 @@ export class S3Client {
 
       let delayMs = this.computeBackoffDelay(attempt);
       if (failure instanceof S3Error && typeof failure.retryAfter === "number") {
-        const retryDelay = Math.ceil(failure.retryAfter * 1000);
-        if (retryDelay > delayMs) {
-          delayMs = retryDelay;
-        }
+        delayMs = Math.max(delayMs, Math.ceil(failure.retryAfter * 1000));
       }
+      delayMs = Math.min(delayMs, this.retryConfig.maxDelayMs);
       if (delayMs > 0) {
         await this.delay(delayMs, context.signal);
       }
@@ -1202,24 +1247,32 @@ function determineErrorRetriable(status: number, code?: string): boolean {
   return RETRIABLE_ERROR_CODES.has(normalized);
 }
 
-function parseRetryAfterHeader(value: string | null): number | undefined {
+/**
+ * How long the store asked to be left alone, in seconds. `x-amz-retry-after`
+ * counts milliseconds and wins. `Retry-After` is either whole seconds or an
+ * HTTP date (RFC 9110, section 10.2.3), and anything else is ignored.
+ */
+function parseRetryAfter(headers: Headers): number | undefined {
+  const amz = headers.get("x-amz-retry-after")?.trim();
+  if (amz && /^\d+$/.test(amz)) {
+    return Number(amz) / 1000;
+  }
+  const value = headers.get("retry-after")?.trim();
   if (!value) {
     return undefined;
   }
-  const trimmed = value.trim();
-  if (!trimmed) {
+  if (/^\d+$/.test(value)) {
+    return Number(value);
+  }
+  if (!/[a-z]/i.test(value)) {
     return undefined;
   }
-  const numeric = Number(trimmed);
-  if (Number.isFinite(numeric)) {
-    return numeric >= 0 ? numeric : undefined;
-  }
-  const parsedDate = Date.parse(trimmed);
-  if (Number.isNaN(parsedDate)) {
+  const date = Date.parse(value);
+  if (Number.isNaN(date)) {
     return undefined;
   }
-  const deltaSeconds = Math.ceil((parsedDate - Date.now()) / 1000);
-  return deltaSeconds > 0 ? deltaSeconds : undefined;
+  const seconds = Math.ceil((date - Date.now()) / 1000);
+  return seconds > 0 ? seconds : undefined;
 }
 
 function normalizeRetryConfig(
@@ -1236,7 +1289,66 @@ function normalizeRetryConfig(
       `retry.baseDelayMs must be a finite number of zero or more, got ${String(merged.baseDelayMs)}.`,
     );
   }
+  if (!(merged.maxDelayMs >= 0 && merged.maxDelayMs <= MAX_TIMER_MS)) {
+    throw new RangeError(
+      `retry.maxDelayMs must be between 0 and ${MAX_TIMER_MS}, got ${String(merged.maxDelayMs)}.`,
+    );
+  }
   return merged;
+}
+
+function normalizeTimeout(value: number | false, name: string): number | false {
+  if (value === false) return false;
+  if (!(value > 0 && value <= MAX_TIMER_MS)) {
+    throw new RangeError(
+      `${name} must be false or between 1 and ${MAX_TIMER_MS} milliseconds, got ${String(value)}.`,
+    );
+  }
+  return value;
+}
+
+/**
+ * The signal one attempt runs under. The caller's signal aborts it with the
+ * caller's own reason, and `arm` starts a deadline that aborts it with a
+ * `TimeoutError`. `release` lets go of both once the attempt has failed.
+ */
+function attemptAbort(caller: AbortSignal | undefined): {
+  signal: AbortSignal;
+  readonly armed: boolean;
+  arm: (ms: number | false) => void;
+  disarm: () => void;
+  release: () => void;
+} {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const follow = (): void => controller.abort(caller?.reason);
+
+  if (caller?.aborted) follow();
+  else caller?.addEventListener("abort", follow, { once: true });
+
+  const disarm = (): void => {
+    clearTimeout(timer);
+    timer = undefined;
+  };
+
+  return {
+    signal: controller.signal,
+    get armed() {
+      return timer !== undefined;
+    },
+    arm(ms) {
+      disarm();
+      if (ms === false) return;
+      timer = setTimeout(() => {
+        controller.abort(new DOMException(`The attempt timed out after ${ms}ms.`, "TimeoutError"));
+      }, ms);
+    },
+    disarm,
+    release() {
+      disarm();
+      caller?.removeEventListener("abort", follow);
+    },
+  };
 }
 
 function normalizeClockSkew(skew: number): number {
@@ -1337,7 +1449,7 @@ function errorFrom(
 ): S3Error {
   const { message, code, resource, region } = init;
   const bucketRegion = response.headers.get("x-amz-bucket-region") ?? undefined;
-  const retryAfter = parseRetryAfterHeader(response.headers.get("retry-after"));
+  const retryAfter = parseRetryAfter(response.headers);
   const retriable = init.retriable ?? determineErrorRetriable(response.status, code);
 
   // Capture headers for debugging
