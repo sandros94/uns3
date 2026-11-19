@@ -35,8 +35,7 @@
     "test:unit": "vitest run --slowTestThreshold=1000 --project unit",
     "test:integration": "vitest run --slowTestThreshold=1000 --project integration",
     "test:coverage": "vitest run --coverage --slowTestThreshold=1000",
-    "typecheck": "tsc --noEmit",
-    "bench": "vitest bench --run"
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
@@ -71,8 +70,8 @@
     },
     "runtime": {
       "name": "node",
-      "version": ">=24.17.0",
-      "onFail": "error"
+      "version": "24.22.3",
+      "onFail": "download"
     }
   },
   "engines": {

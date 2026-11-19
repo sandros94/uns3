@@ -1,8 +1,6 @@
 # uns3
 
-[![npm version](https://npmx.dev/api/registry/badge/version/uns3?name=true)](https://npmx.dev/package/uns3)
-[![npm downloads](https://npmx.dev/api/registry/badge/downloads/uns3)](https://npmx.dev/package/uns3)
-[![bundle size](https://npmx.dev/api/registry/badge/size/uns3)](https://npmx.dev/package/uns3)
+[![npm version](https://npmx.dev/api/registry/badge/version/uns3?name=true)](https://npmx.dev/package/uns3) [![npm downloads](https://npmx.dev/api/registry/badge/downloads/uns3)](https://npmx.dev/package/uns3) [![bundle size](https://npmx.dev/api/registry/badge/size/uns3)](https://npmx.dev/package/uns3)
 
 Tiny, runtime-agnostic, S3 client.
 
@@ -17,8 +15,7 @@ Key features:
 - Zero native dependencies, minimal bundle size
 
 > [!WARNING]
-> This package is in active development. It is not recommended for production use yet unless you are willing to help with testing and feedback.
-> Expect breaking changes, as I prioritize usability and correctness over stability at this stage.
+> This package is in active development. It is not recommended for production use yet unless you are willing to help with testing and feedback. Expect breaking changes, as I prioritize usability and correctness over stability at this stage.
 
 ## Usage
 
@@ -359,12 +356,7 @@ await client.abortMultipart({
 
 <!-- automd:contributors license=MIT -->
 
-Published under the [MIT](https://github.com/sandros94/uns3/blob/main/LICENSE) license.
-Made by [community](https://github.com/sandros94/uns3/graphs/contributors) 💛
-<br><br>
-<a href="https://github.com/sandros94/uns3/graphs/contributors">
-<img src="https://contrib.rocks/image?repo=sandros94/uns3" />
-</a>
+Published under the [MIT](https://github.com/sandros94/uns3/blob/main/LICENSE) license. Made by [community](https://github.com/sandros94/uns3/graphs/contributors) 💛 <br><br> <a href="https://github.com/sandros94/uns3/graphs/contributors"> <img src="https://contrib.rocks/image?repo=sandros94/uns3" /> </a>
 
 <!-- /automd -->
 

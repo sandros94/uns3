@@ -17,9 +17,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { S3Error } from "../../src/index.ts";
 import type { S3Client } from "../../src/index.ts";
 import {
-  BUCKET,
-  HAS_CONTAINER_RUNTIME,
   bytesOf,
+  canRun,
   clientFor,
   countingBytes,
   discard,
@@ -52,7 +51,7 @@ const TAIL_PART_BYTES = 1024;
 
 const SELECTED = selectedStores();
 
-describe.skipIf(!HAS_CONTAINER_RUNTIME).each(SELECTED)("$name", (spec: StoreSpec) => {
+describe.skipIf(!canRun(SELECTED)).each(SELECTED)("$name", (spec: StoreSpec) => {
   let store: StartedStore;
   let client: S3Client;
 
@@ -62,7 +61,7 @@ describe.skipIf(!HAS_CONTAINER_RUNTIME).each(SELECTED)("$name", (spec: StoreSpec
   });
 
   afterAll(async () => {
-    await store?.container.stop();
+    await store?.stop();
   });
 
   describe("put and get", () => {
@@ -925,7 +924,7 @@ describe.skipIf(!HAS_CONTAINER_RUNTIME).each(SELECTED)("$name", (spec: StoreSpec
     it("answers 404 to a presigned GET of a key that does not exist", async () => {
       const url = await client.getSignedUrl({
         method: "GET",
-        bucket: BUCKET,
+        bucket: store.bucket,
         key: `${randomPrefix()}absent.txt`,
         expiresInSeconds: 300,
       });

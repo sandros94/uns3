@@ -1,6 +1,11 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  /*
+   * Lets a local `.env` carry the `UNS3_TEST_*` variables that point the
+   * integration battery at an external store. Nothing else is read from it.
+   */
+  envPrefix: "UNS3_TEST_",
   test: {
     slowTestThreshold: 2000,
     coverage: {
