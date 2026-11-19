@@ -130,20 +130,12 @@ describe("S3Client", () => {
       fetch: fetchMock,
     });
 
-    try {
-      await client.del({
-        bucket: "my-bucket",
-        key: "protected.txt",
-      });
-      // Should not reach here
-      expect.fail("Should have thrown S3Error");
-    } catch (error) {
-      expect(error).toBeInstanceOf(S3Error);
-      const s3Err = error as S3Error;
-      expect(s3Err.status).toBe(403);
-      expect(s3Err.code).toBe("AccessDenied");
-      expect(s3Err.requestId).toBe("REQUESTID123");
-    }
+    const error = await client
+      .del({ bucket: "my-bucket", key: "protected.txt" })
+      .catch((error: unknown) => error);
+
+    expect(error).toBeInstanceOf(S3Error);
+    expect(error).toMatchObject({ status: 403, code: "AccessDenied", requestId: "REQUESTID123" });
   });
 
   it("lists objects and parses XML response", async () => {
@@ -253,22 +245,16 @@ describe("S3Client", () => {
       fetch: fetchMock,
     });
 
-    const promise = client.get({ bucket: "my-bucket", key: "bad.txt" });
-    try {
-      await promise;
-      expect.fail("Should have thrown S3Error");
-    } catch (error) {
-      expect(error).toBeInstanceOf(S3Error);
-      const s3Error = error as S3Error;
-      expect(s3Error.cause).toBeDefined();
-      const cause = s3Error.cause as { headers: Record<string, string> };
-      const headers = cause.headers;
+    const error = await client
+      .get({ bucket: "my-bucket", key: "bad.txt" })
+      .catch((error: unknown) => error);
 
-      expect(headers["x-custom-header"]).toBe("allowed");
-      expect(headers["x-amz-request-id"]).toBe("123");
-      expect(headers["content-length"]).toBeUndefined();
-      expect(headers["content-type"]).toBeUndefined();
-    }
+    expect(error).toBeInstanceOf(S3Error);
+    const { headers } = (error as S3Error).cause as { headers: Record<string, string> };
+    expect(headers["x-custom-header"]).toBe("allowed");
+    expect(headers["x-amz-request-id"]).toBe("123");
+    expect(headers["content-length"]).toBeUndefined();
+    expect(headers["content-type"]).toBeUndefined();
   });
 
   it("presigns requests with expected query parameters", async () => {
