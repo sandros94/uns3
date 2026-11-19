@@ -587,9 +587,10 @@ describe("S3Client", () => {
     let captured: Request | undefined;
     const fetchMock = createFetchMock(async (request) => {
       captured = request;
-      return new Response("<CompleteMultipartUploadResult></CompleteMultipartUploadResult>", {
-        status: 200,
-      });
+      return new Response(
+        "<CompleteMultipartUploadResult><ETag>&quot;e&quot;</ETag></CompleteMultipartUploadResult>",
+        { status: 200 },
+      );
     });
 
     const client = new S3Client({
@@ -599,7 +600,7 @@ describe("S3Client", () => {
       fetch: fetchMock,
     });
 
-    const response = await client.completeMultipart({
+    const result = await client.completeMultipart({
       bucket: "my-bucket",
       key: "photos/raw.png",
       uploadId: "upload-123",
@@ -609,7 +610,7 @@ describe("S3Client", () => {
       ],
     });
 
-    expect(response.status).toBe(200);
+    expect(result.etag).toBe('"e"');
     expect(captured).toBeDefined();
     const request = captured!;
     expect(request.headers.get("content-type")).toBe("application/xml");

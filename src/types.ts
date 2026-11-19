@@ -271,6 +271,14 @@ export interface CompleteMultipartParams
   parts: Array<{ partNumber: number; etag: string }>;
 }
 
+/** Result of completing a multipart upload. */
+export interface CompleteMultipartResult {
+  /** ETag of the assembled object, exactly as the store reported it. */
+  etag: string;
+  /** URL of the assembled object, when the store reports one. */
+  location?: string;
+}
+
 /** Parameters for aborting an in-progress multipart upload. */
 export interface AbortMultipartParams extends BaseRequest {
   /** Object key matching the initiated upload. */

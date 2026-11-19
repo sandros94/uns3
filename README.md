@@ -291,10 +291,10 @@ for (let i = 0; i * chunkSize < file.size; i++) {
 
 #### 3. `completeMultipart()`
 
-Finish the multipart upload after all parts have been uploaded.
+Finish the multipart upload after all parts have been uploaded. It resolves with the assembled object's `etag` (and `location`, when the store reports one). S3 can report a failure inside a `200` on this call, so the response body is checked, and an error found there is raised and retried like any other.
 
 ```typescript
-await client.completeMultipart({
+const { etag } = await client.completeMultipart({
   uploadId,
   key: "large-video.mp4",
   parts: parts,
@@ -307,21 +307,21 @@ The `completeMultipart()` method supports optional conditional headers (`ifMatch
 
 ```typescript
 // Only overwrite if the current ETag matches
-const response = await client.completeMultipart({
-  uploadId,
-  key: "large-video.mp4",
-  parts: parts,
-  ifMatch: '"abc123"', // Current object's ETag
-});
-
-if (response.status === 412) {
-  console.log("Precondition failed - object was modified by someone else");
-} else {
-  console.log("Upload successful");
+try {
+  await client.completeMultipart({
+    uploadId,
+    key: "large-video.mp4",
+    parts: parts,
+    ifMatch: '"abc123"', // Current object's ETag
+  });
+} catch (error) {
+  if (error instanceof S3Error && error.status === 412) {
+    console.log("Precondition failed - object was modified by someone else");
+  } else {
+    throw error;
+  }
 }
 ```
-
-When conditional headers are used and the condition fails, S3 returns `412 Precondition Failed` (not `304 Not Modified` like GET/HEAD operations).
 
 #### `abortMultipart()`
 
@@ -351,6 +351,8 @@ const client = new S3Client({
 ```
 
 Aborting the request's `signal` stops it at once, with the signal's own reason, and is never retried.
+
+Redirects are never followed. A bucket that lives in another region answers with an `S3Error` whose `bucketRegion` names it.
 
 ## Development
 

@@ -242,16 +242,14 @@ describe.skipIf(!canRun(SELECTED)).each(SELECTED)("$name", (spec: StoreSpec) => 
         contentLength: first.byteLength,
       });
       const partTwo = await client.uploadPart({ key, uploadId, partNumber: 2, body: second });
-      await discard(
-        await client.completeMultipart({
-          key,
-          uploadId,
-          parts: [
-            { partNumber: 1, etag: partOne.etag },
-            { partNumber: 2, etag: partTwo.etag },
-          ],
-        }),
-      );
+      await client.completeMultipart({
+        key,
+        uploadId,
+        parts: [
+          { partNumber: 1, etag: partOne.etag },
+          { partNumber: 2, etag: partTwo.etag },
+        ],
+      });
 
       const read = await client.get({ key });
       expect(read.headers.get("content-length")).toBe(String(first.length + second.length));
@@ -707,8 +705,7 @@ describe.skipIf(!canRun(SELECTED)).each(SELECTED)("$name", (spec: StoreSpec) => 
           { partNumber: 2, etag: partTwo.etag },
         ],
       });
-      expect(completed.status).toBe(200);
-      await discard(completed);
+      expect(completed.etag).toMatch(/^"[\da-f]{32}-2"$/);
 
       const read = await client.get({ key });
       expect(read.headers.get("content-length")).toBe(String(whole.length));
@@ -724,16 +721,14 @@ describe.skipIf(!canRun(SELECTED)).each(SELECTED)("$name", (spec: StoreSpec) => 
       const { uploadId } = await client.initiateMultipart({ key });
       const partOne = await client.uploadPart({ key, uploadId, partNumber: 1, body: first });
       const partTwo = await client.uploadPart({ key, uploadId, partNumber: 2, body: second });
-      await discard(
-        await client.completeMultipart({
-          key,
-          uploadId,
-          parts: [
-            { partNumber: 1, etag: partOne.etag },
-            { partNumber: 2, etag: partTwo.etag },
-          ],
-        }),
-      );
+      await client.completeMultipart({
+        key,
+        uploadId,
+        parts: [
+          { partNumber: 1, etag: partOne.etag },
+          { partNumber: 2, etag: partTwo.etag },
+        ],
+      });
 
       /* Deliberately straddling the part boundary, which is where an assembled
          object is likeliest to be stitched wrong. */
@@ -768,16 +763,14 @@ describe.skipIf(!canRun(SELECTED)).each(SELECTED)("$name", (spec: StoreSpec) => 
       });
       const partOne = await checked.uploadPart({ key, uploadId, partNumber: 1, body: first });
       const partTwo = await checked.uploadPart({ key, uploadId, partNumber: 2, body: second });
-      await discard(
-        await checked.completeMultipart({
-          key,
-          uploadId,
-          parts: [
-            { partNumber: 1, etag: partOne.etag },
-            { partNumber: 2, etag: partTwo.etag },
-          ],
-        }),
-      );
+      await checked.completeMultipart({
+        key,
+        uploadId,
+        parts: [
+          { partNumber: 1, etag: partOne.etag },
+          { partNumber: 2, etag: partTwo.etag },
+        ],
+      });
 
       const read = await checked.get({ key });
       await expect(bytesOf(read).then(sha256Hex)).resolves.toBe(await sha256Hex(whole));

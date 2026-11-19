@@ -239,9 +239,12 @@ describe("expectedStatus overrides", () => {
   });
 
   it("is honored by completeMultipart", async () => {
-    const { client } = clientReturning(201, "<CompleteMultipartUploadResult/>");
+    const { client } = clientReturning(
+      201,
+      "<CompleteMultipartUploadResult><ETag>&quot;e&quot;</ETag></CompleteMultipartUploadResult>",
+    );
 
-    const response = await client.completeMultipart({
+    const result = await client.completeMultipart({
       bucket: BUCKET,
       key: KEY,
       uploadId: "upload-123",
@@ -249,7 +252,7 @@ describe("expectedStatus overrides", () => {
       expectedStatus: [200, 201],
     });
 
-    expect(response.status).toBe(201);
+    expect(result.etag).toBe('"e"');
   });
 
   it("is honored by abortMultipart", async () => {

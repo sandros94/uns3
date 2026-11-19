@@ -17,6 +17,7 @@ import type {
   Credentials,
   AbortMultipartParams,
   CompleteMultipartParams,
+  CompleteMultipartResult,
   DeleteObjectParams,
   GetObjectParams,
   HeadObjectParams,
@@ -273,17 +274,18 @@ export class S3Client {
       applyQuery(url, params.query);
     }
 
-    const response = await this.perform({
-      method: "GET",
-      url,
-      headers,
-      bucket,
-      key: undefined,
-      expectedStatus: params.expectedStatus ?? 200,
-      signal: params.signal,
-    });
-
-    const text = await response.text();
+    const text = await this.performXml(
+      {
+        method: "GET",
+        url,
+        headers,
+        bucket,
+        key: undefined,
+        expectedStatus: params.expectedStatus ?? 200,
+        signal: params.signal,
+      },
+      "ListBucketResult",
+    );
     return parseListObjectsV2(text);
   }
 
@@ -371,21 +373,19 @@ export class S3Client {
       contentEncoding: params.contentEncoding,
     });
 
-    const response = await this.perform({
-      method: "POST",
-      url,
-      headers,
-      bucket,
-      key,
-      expectedStatus: params.expectedStatus ?? 200,
-      signal: params.signal,
-    });
-
-    const text = await response.text();
-    const uploadId = parseInitiateMultipartUpload(text);
-    if (!uploadId) {
-      throw new Error("UploadId not present in InitiateMultipartUpload response.");
-    }
+    const uploadId = await this.performXml(
+      {
+        method: "POST",
+        url,
+        headers,
+        bucket,
+        key,
+        expectedStatus: params.expectedStatus ?? 200,
+        signal: params.signal,
+      },
+      "InitiateMultipartUploadResult",
+      (text) => extractTag(text, "UploadId") || undefined,
+    );
 
     return { uploadId };
   }
@@ -480,12 +480,17 @@ export class S3Client {
    *
    * Supports optional conditional headers (`ifMatch`, `ifNoneMatch`) for conditional
    * overwrites. Note that not all S3-compatible providers support these headers.
-   * When conditions fail, S3 returns `412 Precondition Failed`.
+   * When a condition fails, the `412 Precondition Failed` is raised as an
+   * {@link S3Error}.
+   *
+   * S3 can report a failure inside a `200` on this call, so the response body is
+   * read before anything is believed. An error found there is raised like any
+   * other, and retried when it is transient.
    *
    * @param params - Configuration for completing the multipart upload.
    * @example
    * ```ts
-   * await client.completeMultipart({
+   * const { etag } = await client.completeMultipart({
    *   bucket: "my-bucket",
    *   key: "large-file.bin",
    *   uploadId: "abc123",
@@ -496,7 +501,7 @@ export class S3Client {
    * });
    * ```
    */
-  async completeMultipart(params: CompleteMultipartParams): Promise<Response> {
+  async completeMultipart(params: CompleteMultipartParams): Promise<CompleteMultipartResult> {
     const bucket = this.resolveBucket(params.bucket);
     const key = this.resolveKey(params);
     const uploadId = validateUploadId(params.uploadId);
@@ -520,16 +525,26 @@ export class S3Client {
       contentType: "application/xml",
     });
 
-    return await this.perform({
-      method: "POST",
-      url,
-      headers,
-      body: payload,
-      bucket,
-      key,
-      expectedStatus: params.expectedStatus ?? [200, 412],
-      signal: params.signal,
-    });
+    let location: string | undefined;
+    const etag = await this.performXml(
+      {
+        method: "POST",
+        url,
+        headers,
+        body: payload,
+        bucket,
+        key,
+        expectedStatus: params.expectedStatus ?? 200,
+        signal: params.signal,
+      },
+      "CompleteMultipartUploadResult",
+      (text) => {
+        location = extractTag(text, "Location") || undefined;
+        return extractTag(text, "ETag") || undefined;
+      },
+    );
+
+    return { etag, location };
   }
 
   /**
@@ -634,6 +649,56 @@ export class S3Client {
   }
 
   private async perform(context: PerformContext): Promise<Response> {
+    return await this.exchange(context, async (response) => response);
+  }
+
+  /**
+   * Sends a request whose answer is an XML document, and returns that document
+   * once it is known to be the one asked for: its root element is `root`, and
+   * `pick`, when given, finds what the caller needs in it.
+   *
+   * Anything else is a failure of the attempt, retried like one. An `<Error>`
+   * document is the failure it reports, whatever the status that carried it.
+   */
+  private async performXml(
+    context: PerformContext,
+    root: string,
+    pick?: (text: string) => string | undefined,
+  ): Promise<string> {
+    return await this.exchange(context, async (response) => {
+      const text = await response.text();
+      const actual = xmlRoot(text);
+      if (actual === "Error") {
+        throw buildError(response, text);
+      }
+      if (actual !== root) {
+        throw invalidResponse(
+          response,
+          text,
+          text.trim()
+            ? `Expected a <${root}> document, got ${actual ? `<${actual}>` : "something that is not XML"}.`
+            : `Expected a <${root}> document, got an empty body.`,
+        );
+      }
+      if (!pick) {
+        return text;
+      }
+      const value = pick(text);
+      if (value === undefined) {
+        throw invalidResponse(
+          response,
+          text,
+          `The <${root}> document is missing a required value.`,
+        );
+      }
+      return value;
+    });
+  }
+
+  private async exchange<T>(
+    context: PerformContext,
+    read: (response: Response) => Promise<T>,
+  ): Promise<T> {
     const credentials = await this.resolveCredentials();
     const unsignedPayload = shouldUseUnsignedPayload(context.method, context.body);
     /*
@@ -668,6 +733,12 @@ export class S3Client {
         headers,
         body: hasBody(context.method) ? (context.body ?? null) : undefined,
         signal: context.signal,
+        /*
+         * A redirect is never followed. Following one sends the request to a
+         * host it was not signed for, stripped of its `Authorization`, and the
+         * caller gets that host's refusal instead of the region the store named.
+         */
+        redirect: "manual",
       };
 
       if (streamedBody) {
@@ -698,7 +769,7 @@ export class S3Client {
         this.updateClockSkew(response);
 
         if (matchesExpected(response.status, context.expectedStatus)) {
-          return response;
+          return await read(response);
         }
 
         failure = await createError(response);
@@ -1220,31 +1291,54 @@ function shouldUseUnsignedPayload(
 }
 
 async function createError(response: Response): Promise<S3Error> {
-  const requestId = response.headers.get("x-amz-request-id") ?? undefined;
-  const extendedRequestId = response.headers.get("x-amz-id-2") ?? undefined;
-  let message = response.statusText || `HTTP ${response.status}`;
+  let text: string | undefined;
+  try {
+    text = await readErrorBody(response);
+  } catch {
+    /* A body that cannot be read leaves the status and headers to speak for it. */
+  }
+  return buildError(response, text);
+}
+
+/** An {@link S3Error} built from a response and the error document it carried, if any. */
+function buildError(response: Response, text: string | undefined): S3Error {
+  let message =
+    response.type === "opaqueredirect"
+      ? "The store answered with a redirect, which is never followed."
+      : response.statusText || `HTTP ${response.status}`;
   let code: string | undefined;
   let resource: string | undefined;
   let region: string | undefined;
-  let bodyText: string | undefined;
 
-  try {
-    const text = await readErrorBody(response);
-    if (text) {
-      bodyText = text;
-      const parsed = parseErrorXml(text);
-      if (parsed.message) message = parsed.message;
-      if (parsed.code) code = parsed.code;
-      resource = parsed.resource ?? resource;
-      region = parsed.region ?? region;
-    }
-  } catch {
-    // ignore parsing errors for now
+  if (text) {
+    const parsed = parseErrorXml(text);
+    if (parsed.message) message = parsed.message;
+    if (parsed.code) code = parsed.code;
+    resource = parsed.resource;
+    region = parsed.region;
   }
 
+  return errorFrom(response, text, { message, code, resource, region });
+}
+
+/**
+ * An {@link S3Error} for a response whose status was fine but whose body was
+ * not the document due. An empty body is retriable, since a connection cut
+ * short leaves exactly that. Anything else is not.
+ */
+function invalidResponse(response: Response, text: string, message: string): S3Error {
+  return errorFrom(response, text, { message, retriable: !text.trim() });
+}
+
+function errorFrom(
+  response: Response,
+  text: string | undefined,
+  init: { message: string; code?: string; resource?: string; region?: string; retriable?: boolean },
+): S3Error {
+  const { message, code, resource, region } = init;
   const bucketRegion = response.headers.get("x-amz-bucket-region") ?? undefined;
   const retryAfter = parseRetryAfterHeader(response.headers.get("retry-after"));
-  const retriable = determineErrorRetriable(response.status, code);
+  const retriable = init.retriable ?? determineErrorRetriable(response.status, code);
 
   // Capture headers for debugging
   const headersRecord: Record<string, string> = {};
@@ -1260,8 +1354,8 @@ async function createError(response: Response): Promise<S3Error> {
     message,
     status: response.status,
     code,
-    requestId,
-    extendedRequestId,
+    requestId: response.headers.get("x-amz-request-id") ?? undefined,
+    extendedRequestId: response.headers.get("x-amz-id-2") ?? undefined,
     retriable,
     retryAfter,
     resource,
@@ -1272,7 +1366,7 @@ async function createError(response: Response): Promise<S3Error> {
       status: response.status,
       statusText: response.statusText,
       headers: headersRecord,
-      body: bodyText,
+      body: text,
     },
   });
 }
@@ -1340,8 +1434,12 @@ function parseErrorXml(xml: string): {
   };
 }
 
-function parseInitiateMultipartUpload(xml: string): string | undefined {
-  return extractTag(xml, "UploadId") ?? undefined;
+const XML_ROOT = /^\s*(?:<\?[\s\S]*?\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<([A-Za-z_][\w.:-]*)/;
+
+/** The name of a document's root element, without a namespace prefix. */
+function xmlRoot(text: string): string | undefined {
+  const name = XML_ROOT.exec(text)?.[1];
+  return name?.slice(name.indexOf(":") + 1);
 }
 
 type CompletedPart = { partNumber: number; etag: string };
