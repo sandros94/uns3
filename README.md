@@ -67,6 +67,7 @@ Other options:
 - `checksum`: `{ algorithm: "sha256" | "crc32c", requireOnPut?: boolean }` adds an integrity checksum to every `put` and `uploadPart` body that can be hashed. With `requireOnPut`, a body that cannot be (a stream, or a Blob over 16 MiB) is refused instead of sent without one.
 - `clockSkewMs`: an offset added to the local clock when signing. The client also corrects itself once the store's clock is five minutes or more away.
 - `retry` and `timeoutMs`: see [Retries and timeouts](#retries-and-timeouts).
+- `signingKeyCache`: where derived signing keys are kept, so a request costs one HMAC instead of five. Every client shares `sharedSigningKeyCache` by default. Pass a `SigningKeyCache` of its own to isolate a tenant, a department or a single request (`new SigningKeyCache({ size })`, 16 keys by default), or `false` to derive a key for every request. Each entry keeps the secret it was derived from for as long as it lives, so `delete(accessKeyId)` a revoked key, or `clear()` the cache, the shared one included.
 - `fetch` and `contentTypeResolver` replace the global `fetch` and the extension-based content type lookup.
 
 ### Methods

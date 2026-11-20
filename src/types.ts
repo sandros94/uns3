@@ -1,3 +1,5 @@
+import type { SigningKeyCache } from "./internal/core/signer.ts";
+
 export type UppercaseOrLowercase<T extends string> = Uppercase<T> | Lowercase<T>;
 export type Methods = UppercaseOrLowercase<"GET" | "HEAD" | "POST" | "PUT" | "DELETE">;
 
@@ -147,6 +149,13 @@ export interface S3ClientConfig {
   clockSkewMs?: number;
   /** Retry configuration for transient failures. */
   retry?: RetryConfig;
+  /**
+   * Where this client keeps derived signing keys. Defaults to
+   * `sharedSigningKeyCache`, which every client shares. Pass a
+   * {@link SigningKeyCache} of its own to isolate it, one per tenant or per
+   * request, or `false` to derive a key for every request.
+   */
+  signingKeyCache?: SigningKeyCache | false;
   /**
    * Deadline in milliseconds of each attempt that moves no object bytes
    * (`head`, `del`, `list` and the multipart calls but `uploadPart`), up to

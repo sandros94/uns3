@@ -17,6 +17,11 @@ export interface SignRequestInput {
   body?: BodyInit | ReadableStream<Uint8Array> | null;
   datetime?: Date;
   unsignedPayload?: boolean;
+  /**
+   * Where the derived signing key is kept. Defaults to
+   * {@link sharedSigningKeyCache}. `false` derives one per request.
+   */
+  signingKeyCache?: SigningKeyCache | false;
 }
 
 /** Result of a SigV4 signing operation, containing the signed headers and associated metadata. */
@@ -37,6 +42,11 @@ export interface PresignInput {
   datetime?: Date;
   /** URL validity in seconds, an integer from 1 to 604800 (seven days). Defaults to 900. */
   expiresInSeconds?: number;
+  /**
+   * Where the derived signing key is kept. Defaults to
+   * {@link sharedSigningKeyCache}. `false` derives one per request.
+   */
+  signingKeyCache?: SigningKeyCache | false;
 }
 
 /** Result of a presigned URL generation, containing the signed URL and associated metadata. */
@@ -81,7 +91,13 @@ export async function signRequest(input: SignRequestInput): Promise<SignRequestR
   const credentialScope = `${shortDate}/${region}/${SERVICE}/aws4_request`;
 
   const stringToSign = buildStringToSign(amzDate, credentialScope, canonicalRequestHash);
-  const signature = await calculateSignature(credentials, shortDate, region, stringToSign);
+  const signature = await calculateSignature(
+    credentials,
+    shortDate,
+    region,
+    stringToSign,
+    input.signingKeyCache,
+  );
   const authorization = buildAuthorizationHeader(
     credentials.accessKeyId,
     credentialScope,
@@ -148,7 +164,13 @@ export async function presignUrl(input: PresignInput): Promise<PresignResult> {
 
   const canonicalRequestHash = await sha256Hex(encoder.encode(canonicalRequest));
   const stringToSign = buildStringToSign(amzDate, credentialScope, canonicalRequestHash);
-  const signature = await calculateSignature(credentials, shortDate, region, stringToSign);
+  const signature = await calculateSignature(
+    credentials,
+    shortDate,
+    region,
+    stringToSign,
+    input.signingKeyCache,
+  );
   presignedUrl.searchParams.set("X-Amz-Signature", signature);
   /*
    * The signature covers the canonical (RFC 3986) query, so the URL handed back
@@ -354,51 +376,109 @@ async function calculateSignature(
   shortDate: string,
   region: string,
   stringToSign: string,
+  cache: SigningKeyCache | false = sharedSigningKeyCache,
 ): Promise<string> {
-  const signingKey = await signingKeyFor(credentials, shortDate, region);
+  if (typeof credentials.secretAccessKey !== "string" || !credentials.secretAccessKey) {
+    throw new TypeError("Signing needs credentials with a secretAccessKey.");
+  }
+  if (cache !== false && typeof cache?.signingKey !== "function") {
+    throw new TypeError("signingKeyCache must be a SigningKeyCache, or false.");
+  }
+  const signingKey =
+    cache === false
+      ? await deriveSigningKey(credentials.secretAccessKey, shortDate, region)
+      : await cache.signingKey(credentials, shortDate, region);
   return toHex(await crypto.subtle.sign("HMAC", signingKey, encoder.encode(stringToSign)));
 }
 
-/** How many signing keys are kept before the cache starts over. */
-const SIGNING_KEY_CACHE_SIZE = 16;
-
 /**
- * Derived signing keys, by access key, day and region, each beside the secret
- * it was derived from. Holding the pending derivation rather than its result lets
- * concurrent requests share one.
- */
-const signingKeys = new Map<string, { secret: string; key: Promise<CryptoKey> }>();
-
-/**
- * The SigV4 signing key for a secret, a day and a region, derived once and
- * then reused. It only changes when one of the three does, so a request costs
- * one HMAC instead of five.
+ * Where derived SigV4 signing keys are kept, so a request costs one HMAC
+ * instead of five. A key only changes with its credentials, its day or its
+ * region.
  *
- * The key is held as a non-extractable `CryptoKey`, so its bytes never sit in
- * script memory. A cached key is used only for the exact secret it came from,
- * so rotated credentials never sign with a stale one.
+ * Every client and signing call uses {@link sharedSigningKeyCache} unless
+ * given a cache of its own. A cache is an object the application places
+ * wherever its isolation needs it: one per tenant, per department, or per
+ * request, and keys never cross between caches. A full cache evicts the key
+ * used least recently.
+ *
+ * Each key is a non-extractable `CryptoKey`, but its entry also holds the
+ * secret it was derived from, as long as the entry lives. Clearing or dropping
+ * a cache lets go of both.
+ *
+ * @example
+ * ```ts
+ * const tenantKeys = new SigningKeyCache({ size: 4 });
+ * const client = new S3Client({ endpoint, credentials, signingKeyCache: tenantKeys });
+ * tenantKeys.delete(credentials.accessKeyId); // after revoking that key
+ * ```
  */
-function signingKeyFor(
-  { accessKeyId, secretAccessKey: secret }: Credentials,
-  shortDate: string,
-  region: string,
-): Promise<CryptoKey> {
-  const id = `${accessKeyId}/${shortDate}/${region}`;
-  const cached = signingKeys.get(id);
-  if (cached?.secret === secret) {
-    return cached.key;
+export class SigningKeyCache {
+  readonly #size: number;
+  readonly #entries = new Map<string, { accessKeyId: string; key: Promise<CryptoKey> }>();
+
+  /**
+   * @param options - `size`, the number of keys kept, defaults to 16.
+   * @throws {TypeError} When `options` is not an object.
+   * @throws {RangeError} When `size` is not a positive integer.
+   */
+  constructor(options: { size?: number } = {}) {
+    if (typeof options !== "object" || options === null) {
+      throw new TypeError("SigningKeyCache takes an options object, such as { size: 8 }.");
+    }
+    const { size = 16 } = options;
+    if (!Number.isSafeInteger(size) || size < 1) {
+      throw new RangeError(`SigningKeyCache size must be a positive integer, got ${String(size)}.`);
+    }
+    this.#size = size;
   }
 
-  if (signingKeys.size >= SIGNING_KEY_CACHE_SIZE) {
-    signingKeys.clear();
+  /**
+   * The signing key for `credentials` on `shortDate` (`YYYYMMDD`) in
+   * `region`, kept or derived into the cache. What the signer calls, so a
+   * cache works with any copy of this module. The pending derivation is what is
+   * kept, so concurrent requests share one, and a failed one is dropped.
+   */
+  signingKey(credentials: Credentials, shortDate: string, region: string): Promise<CryptoKey> {
+    const { accessKeyId, secretAccessKey } = credentials;
+    const entries = this.#entries;
+    const id = JSON.stringify([accessKeyId, secretAccessKey, shortDate, region]);
+    const cached = entries.get(id);
+    if (cached) {
+      entries.delete(id);
+      entries.set(id, cached);
+      return cached.key;
+    }
+
+    if (entries.size >= this.#size) {
+      entries.delete(entries.keys().next().value!);
+    }
+    const key = deriveSigningKey(secretAccessKey, shortDate, region);
+    entries.set(id, { accessKeyId, key });
+    key.catch(() => {
+      if (entries.get(id)?.key === key) entries.delete(id);
+    });
+    return key;
   }
-  const key = deriveSigningKey(secret, shortDate, region);
-  signingKeys.set(id, { secret, key });
-  key.catch(() => {
-    if (signingKeys.get(id)?.key === key) signingKeys.delete(id);
-  });
-  return key;
+
+  /** Forgets every key derived for `accessKeyId`, for every secret, day and region. */
+  delete(accessKeyId: string): void {
+    for (const [id, entry] of this.#entries) {
+      if (entry.accessKeyId === accessKeyId) this.#entries.delete(id);
+    }
+  }
+
+  /** Forgets every key. */
+  clear(): void {
+    this.#entries.clear();
+  }
 }
+
+/**
+ * The cache every client and signing call uses unless given its own. Exported
+ * so the application can `delete` a revoked access key from it, or `clear` it.
+ */
+export const sharedSigningKeyCache: SigningKeyCache = /* @__PURE__ */ new SigningKeyCache();
 
 async function deriveSigningKey(
   secret: string,

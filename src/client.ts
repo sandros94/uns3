@@ -11,6 +11,7 @@ import {
   signRequest,
   isPayloadStream,
 } from "./core.ts";
+import type { SigningKeyCache } from "./core.ts";
 import type {
   Methods,
   ContentTypeResolver,
@@ -106,6 +107,7 @@ export class S3Client {
   private readonly checksumConfig: ChecksumConfig;
   private clockSkewMs: number;
   private readonly timeoutMs: number | false;
+  private readonly signingKeyCache: SigningKeyCache | false | undefined;
   private readonly retryConfig: Required<Omit<RetryConfig, "retriable">> &
     Pick<RetryConfig, "retriable">;
 
@@ -124,6 +126,15 @@ export class S3Client {
     this.contentTypeResolver = config.contentTypeResolver ?? defaultContentTypeResolver;
     this.checksumConfig = config.checksum ? { ...config.checksum } : { algorithm: "none" };
     this.retryConfig = normalizeRetryConfig(config.retry);
+    const signingKeyCache = config.signingKeyCache;
+    if (
+      signingKeyCache !== undefined &&
+      signingKeyCache !== false &&
+      typeof signingKeyCache?.signingKey !== "function"
+    ) {
+      throw new TypeError("signingKeyCache must be a SigningKeyCache, or false.");
+    }
+    this.signingKeyCache = signingKeyCache;
     this.timeoutMs = normalizeTimeout(config.timeoutMs ?? DEFAULT_TIMEOUT_MS, "timeoutMs");
     this.clockSkewMs = normalizeClockSkew(config.clockSkewMs ?? 0);
   }
@@ -363,6 +374,7 @@ export class S3Client {
       region: this.region,
       datetime: this.createSigningDate(),
       expiresInSeconds: params.expiresInSeconds,
+      signingKeyCache: this.signingKeyCache,
     });
 
     return result.url.toString();
@@ -778,6 +790,7 @@ export class S3Client {
           region: this.region,
           unsignedPayload,
           datetime: this.createSigningDate(),
+          signingKeyCache: this.signingKeyCache,
         });
         headers = result.headers;
         /* The payload is hashed once: every later attempt signs the same hash. */

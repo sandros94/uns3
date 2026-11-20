@@ -2,7 +2,9 @@ import { createHash, createHmac } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { presignUrl, signRequest } from "../../src/core.ts";
+import { SigningKeyCache, presignUrl, sharedSigningKeyCache, signRequest } from "../../src/core.ts";
+import * as root from "../../src/index.ts";
+import { S3Client } from "../../src/index.ts";
 import type { Credentials } from "../../src/types.ts";
 
 const credentials: Credentials = {
@@ -148,117 +150,317 @@ describe("signer", () => {
 });
 
 /*
- * The signing key depends on the secret, the day and the region alone, so it
- * is derived once and reused: a request then costs one HMAC instead of five.
- * Each test signs for its own region, so the module-level cache one test fills
- * never answers for another.
+ * Derived signing keys are kept in a `SigningKeyCache`, so a request costs one
+ * HMAC instead of five. A cache is an object the application places: one per
+ * tenant, per department, per request, or none at all. Every test below signs
+ * through a cache of its own, so no test is answered by another's keys.
  */
-describe("signing key", () => {
+describe("signing key caches", () => {
   const url = new URL("https://my-bucket.s3.amazonaws.com/test.txt");
+  const day = new Date("2024-06-07T08:09:10Z");
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  const signed = async (
-    region: string,
-    datetime: Date,
-    secretAccessKey = credentials.secretAccessKey,
+  const sign = async (
+    signingKeyCache: SigningKeyCache | false,
+    accessKeyId = "AKIDCACHE",
+    secretAccessKey = `secret-${accessKeyId}`,
+    { region = "caches", datetime = day } = {},
   ): Promise<string> => {
     const result = await signRequest({
       method: "GET",
       url,
-      credentials: { ...credentials, secretAccessKey },
+      credentials: { accessKeyId, secretAccessKey },
       region,
       datetime,
       unsignedPayload: true,
+      signingKeyCache,
     });
     return result.headers.get("authorization")!;
   };
 
-  it("derives the key once per day and region", async () => {
-    const day = new Date("2024-03-04T05:06:07Z");
-    await signed("cache-region-1", day);
-    const importKey = vi.spyOn(crypto.subtle, "importKey");
-
-    await signed("cache-region-1", new Date("2024-03-04T23:59:59Z"));
-    expect(importKey).not.toHaveBeenCalled();
-
-    await signed("cache-region-1", new Date("2024-03-05T00:00:00Z"));
-    expect(importKey).toHaveBeenCalled();
-
-    importKey.mockClear();
-    await signed("cache-region-2", day);
-    expect(importKey).toHaveBeenCalled();
-  });
-
-  it("shares one derivation between concurrent requests", async () => {
-    const importKey = vi.spyOn(crypto.subtle, "importKey");
-    const day = new Date("2024-03-04T05:06:07Z");
-    await signed("cache-region-3", day);
-    const once = importKey.mock.calls.length;
-    importKey.mockClear();
-
-    const [first, second] = await Promise.all([
-      signed("cache-region-5", day),
-      signed("cache-region-5", day),
-    ]);
-
-    expect(first).toBe(second);
-    expect(importKey).toHaveBeenCalledTimes(once);
-  });
-
-  it("keeps one key per access key, so two credentials never evict each other", async () => {
-    const day = new Date("2024-03-04T05:06:07Z");
-    const sign = (accessKeyId: string, secretAccessKey: string) =>
-      signRequest({
-        method: "GET",
-        url,
-        credentials: { accessKeyId, secretAccessKey },
-        region: "cache-region-6",
-        datetime: day,
-        unsignedPayload: true,
-      });
-    await sign("AKIDONE", "secret-one");
-    await sign("AKIDTWO", "secret-two");
-    const importKey = vi.spyOn(crypto.subtle, "importKey");
-
-    await sign("AKIDONE", "secret-one");
-    await sign("AKIDTWO", "secret-two");
-
-    expect(importKey).not.toHaveBeenCalled();
-  });
-
-  it("never signs with the key of another secret", async () => {
-    const day = new Date("2024-03-04T05:06:07Z");
-    const original = await signed("cache-region-4", day);
-
-    const rotated = await signed("cache-region-4", day, "a-different-secret");
-
-    expect(rotated).not.toBe(original);
-    const signature = /Signature=([\da-f]+)/.exec(rotated)![1];
-    const key = deriveSigningKey("a-different-secret", "20240304", "cache-region-4", "s3");
+  /** The signature an independent implementation computes for the same request. */
+  const expected = (secret: string, region: string): string => {
     const canonical = [
       "GET",
       "/test.txt",
       "",
-      `host:${url.host}\nx-amz-content-sha256:UNSIGNED-PAYLOAD\nx-amz-date:20240304T050607Z\n`,
+      `host:${url.host}\nx-amz-content-sha256:UNSIGNED-PAYLOAD\nx-amz-date:20240607T080910Z\n`,
       "host;x-amz-content-sha256;x-amz-date",
       "UNSIGNED-PAYLOAD",
     ].join("\n");
     const stringToSign = [
       "AWS4-HMAC-SHA256",
-      "20240304T050607Z",
-      "20240304/cache-region-4/s3/aws4_request",
+      "20240607T080910Z",
+      `20240607/${region}/s3/aws4_request`,
       createHash("sha256").update(canonical, "utf8").digest("hex"),
     ].join("\n");
-    expect(signature).toBe(createHmac("sha256", key).update(stringToSign, "utf8").digest("hex"));
+    return createHmac("sha256", deriveSigningKey(secret, "20240607", region, "s3"))
+      .update(stringToSign, "utf8")
+      .digest("hex");
+  };
+
+  const signatureOf = (authorization: string): string =>
+    /Signature=([\da-f]+)/.exec(authorization)![1]!;
+
+  it("derives a key once per day and region", async () => {
+    const cache = new SigningKeyCache();
+    await sign(cache);
+    const importKey = vi.spyOn(crypto.subtle, "importKey");
+
+    await sign(cache, undefined, undefined, { datetime: new Date("2024-06-07T23:59:59Z") });
+    expect(importKey).not.toHaveBeenCalled();
+
+    await sign(cache, undefined, undefined, { datetime: new Date("2024-06-08T00:00:00Z") });
+    expect(importKey).toHaveBeenCalled();
+
+    importKey.mockClear();
+    await sign(cache, undefined, undefined, { region: "elsewhere" });
+    expect(importKey).toHaveBeenCalled();
+  });
+
+  it("shares one derivation between concurrent requests", async () => {
+    const importKey = vi.spyOn(crypto.subtle, "importKey");
+    await sign(new SigningKeyCache());
+    const once = importKey.mock.calls.length;
+    expect(once).toBeGreaterThan(0);
+    importKey.mockClear();
+
+    const cache = new SigningKeyCache();
+    const [first, second] = await Promise.all([sign(cache), sign(cache)]);
+
+    expect(first).toBe(second);
+    expect(importKey).toHaveBeenCalledTimes(once);
+  });
+
+  it("keeps a key per secret, so a shared access key id never thrashes", async () => {
+    const cache = new SigningKeyCache();
+    await sign(cache, "minioadmin", "secret-one");
+    await sign(cache, "minioadmin", "secret-two");
+    const importKey = vi.spyOn(crypto.subtle, "importKey");
+
+    const one = await sign(cache, "minioadmin", "secret-one");
+    const two = await sign(cache, "minioadmin", "secret-two");
+
+    expect(importKey).not.toHaveBeenCalled();
+    expect(signatureOf(one)).toBe(expected("secret-one", "caches"));
+    expect(signatureOf(two)).toBe(expected("secret-two", "caches"));
+  });
+
+  it("never mistakes one credential for another, whatever their characters", async () => {
+    const cache = new SigningKeyCache();
+    await sign(cache, "A/20240607", "same-secret", { region: "eu" });
+
+    const other = await sign(cache, "A", "same-secret", { region: "20240607/eu" });
+
+    expect(signatureOf(other)).toBe(expected("same-secret", "20240607/eu"));
+  });
+
+  it("does not cache a derivation that failed", async () => {
+    const cache = new SigningKeyCache();
+    vi.spyOn(crypto.subtle, "importKey").mockRejectedValueOnce(new Error("no crypto today"));
+
+    await expect(sign(cache)).rejects.toThrow("no crypto today");
+    const signed = await sign(cache);
+
+    expect(signatureOf(signed)).toBe(expected("secret-AKIDCACHE", "caches"));
+  });
+
+  it("lets a late failure of a cleared derivation leave its successor alone", async () => {
+    const cache = new SigningKeyCache();
+    let fail!: (error: Error) => void;
+    vi.spyOn(crypto.subtle, "importKey").mockImplementationOnce(
+      () => new Promise<CryptoKey>((_, reject) => (fail = reject)),
+    );
+
+    const pending = cache.signingKey(credentials, "20240607", "caches");
+    await vi.waitFor(() => expect(fail).toBeDefined());
+    cache.clear();
+    await cache.signingKey(credentials, "20240607", "caches");
+    fail(new Error("too late"));
+    await expect(pending).rejects.toThrow("too late");
+
+    vi.restoreAllMocks();
+    const importKey = vi.spyOn(crypto.subtle, "importKey");
+    await cache.signingKey(credentials, "20240607", "caches");
+    expect(importKey).not.toHaveBeenCalled();
+  });
+
+  it("evicts the least recently used key once full", async () => {
+    const cache = new SigningKeyCache({ size: 2 });
+    await sign(cache, "AKIDA");
+    await sign(cache, "AKIDB");
+    await sign(cache, "AKIDA");
+    await sign(cache, "AKIDC");
+    const importKey = vi.spyOn(crypto.subtle, "importKey");
+
+    await sign(cache, "AKIDA");
+    await sign(cache, "AKIDC");
+    expect(importKey).not.toHaveBeenCalled();
+
+    await sign(cache, "AKIDB");
+    expect(importKey).toHaveBeenCalled();
+  });
+
+  it("holds sixteen keys by default", async () => {
+    const cache = new SigningKeyCache();
+    for (let index = 0; index < 16; index += 1) await sign(cache, `AKID${index}`);
+    const importKey = vi.spyOn(crypto.subtle, "importKey");
+
+    await sign(cache, "AKID0");
+    expect(importKey).not.toHaveBeenCalled();
+
+    await sign(cache, "AKID16");
+    importKey.mockClear();
+    await sign(cache, "AKID1");
+    expect(importKey).toHaveBeenCalled();
+  });
+
+  it("forgets an access key on every day and region, or every key at once", async () => {
+    const cache = new SigningKeyCache();
+    const later = { region: "elsewhere", datetime: new Date("2024-06-09T00:00:00Z") };
+    await sign(cache, "AKIDKEEP");
+    await sign(cache, "AKIDDROP");
+    await sign(cache, "AKIDDROP", undefined, later);
+    const importKey = vi.spyOn(crypto.subtle, "importKey");
+
+    cache.delete("AKIDDROP");
+    await sign(cache, "AKIDKEEP");
+    expect(importKey).not.toHaveBeenCalled();
+    await sign(cache, "AKIDDROP");
+    expect(importKey).toHaveBeenCalled();
+    importKey.mockClear();
+    await sign(cache, "AKIDDROP", undefined, later);
+    expect(importKey).toHaveBeenCalled();
+
+    importKey.mockClear();
+    cache.clear();
+    await sign(cache, "AKIDKEEP");
+    expect(importKey).toHaveBeenCalled();
+  });
+
+  it("derives a fresh key on every request without a cache", async () => {
+    await sign(false);
+    const importKey = vi.spyOn(crypto.subtle, "importKey");
+
+    await sign(false);
+
+    expect(importKey).toHaveBeenCalled();
+  });
+
+  it("signs through the shared cache by default, which the application can clear", async () => {
+    const input = {
+      method: "GET",
+      url,
+      credentials,
+      region: "shared",
+      unsignedPayload: true,
+    } as const;
+    await signRequest(input);
+    const importKey = vi.spyOn(crypto.subtle, "importKey");
+
+    await signRequest(input);
+    expect(importKey).not.toHaveBeenCalled();
+
+    sharedSigningKeyCache.clear();
+    await signRequest(input);
+    expect(importKey).toHaveBeenCalled();
+  });
+
+  it("works with a cache from another copy of the module", async () => {
+    /* What two installed copies of uns3 amount to: a cache this module did not create. */
+    const foreign = new SigningKeyCache();
+    const lookalike = {
+      signingKey: foreign.signingKey.bind(foreign),
+      delete: foreign.delete.bind(foreign),
+      clear: foreign.clear.bind(foreign),
+    } as unknown as SigningKeyCache;
+
+    const signed = await sign(lookalike);
+
+    expect(signatureOf(signed)).toBe(expected("secret-AKIDCACHE", "caches"));
+  });
+
+  it("refuses what is not a cache, up front", async () => {
+    const endpoint = "https://s3.amazonaws.com";
+    // @ts-expect-error a Map holds no signing keys
+    expect(() => new S3Client({ endpoint, signingKeyCache: new Map() })).toThrow(TypeError);
+    // @ts-expect-error true is not a cache
+    expect(() => new S3Client({ endpoint, signingKeyCache: true })).toThrow(TypeError);
+    await expect(sign({} as SigningKeyCache)).rejects.toThrow(TypeError);
+  });
+
+  it("refuses credentials without a secret rather than signing with nothing", async () => {
+    const cache = new SigningKeyCache();
+
+    await expect(sign(cache, "AKIDBAD", null as never)).rejects.toThrow(TypeError);
+    await expect(sign(false, "AKIDBAD", null as never)).rejects.toThrow(TypeError);
+
+    cache.delete("AKIDBAD");
+    expect(signatureOf(await sign(cache))).toBe(expected("secret-AKIDCACHE", "caches"));
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])("refuses a size of %s", (size) => {
+    expect(() => new SigningKeyCache({ size })).toThrow(RangeError);
+  });
+
+  it.each([8, "4", null])("refuses %j in place of the options object", (options) => {
+    expect(() => new SigningKeyCache(options as never)).toThrow(TypeError);
+  });
+
+  it("is the cache a client signs and presigns with", async () => {
+    const cache = new SigningKeyCache();
+    const client = new S3Client({
+      endpoint: "https://s3.amazonaws.com",
+      region: "client-cache",
+      credentials: { accessKeyId: "AKIDCLIENT", secretAccessKey: "secret" },
+      signingKeyCache: cache,
+      fetch: (async () => new Response("ok")) as typeof fetch,
+    });
+    await client.get({ bucket: "my-bucket", key: "a.txt" });
+    const importKey = vi.spyOn(crypto.subtle, "importKey");
+
+    await client.getSignedUrl({ method: "GET", bucket: "my-bucket", key: "a.txt" });
+    expect(importKey).not.toHaveBeenCalled();
+
+    cache.clear();
+    await client.get({ bucket: "my-bucket", key: "a.txt" });
+    expect(importKey).toHaveBeenCalled();
+  });
+
+  it("derives on every request of a client told to keep no cache", async () => {
+    const client = new S3Client({
+      endpoint: "https://s3.amazonaws.com",
+      region: "client-cache",
+      credentials: { accessKeyId: "AKIDNOCACHE", secretAccessKey: "secret" },
+      signingKeyCache: false,
+      fetch: (async () => new Response("ok")) as typeof fetch,
+    });
+    await client.get({ bucket: "my-bucket", key: "a.txt" });
+    const importKey = vi.spyOn(crypto.subtle, "importKey");
+
+    await client.get({ bucket: "my-bucket", key: "a.txt" });
+
+    expect(importKey).toHaveBeenCalled();
+  });
+
+  it("is exported from the package root as the same class and shared cache", () => {
+    expect(root.SigningKeyCache).toBe(SigningKeyCache);
+    expect(root.sharedSigningKeyCache).toBe(sharedSigningKeyCache);
   });
 
   it("knows the hash of an empty payload without computing it", async () => {
     const digest = vi.spyOn(crypto.subtle, "digest");
 
-    const result = await signRequest({ method: "DELETE", url, credentials, region: "us-east-1" });
+    const result = await signRequest({
+      method: "DELETE",
+      url,
+      credentials,
+      region: "us-east-1",
+      signingKeyCache: new SigningKeyCache(),
+    });
 
     expect(result.payloadHash).toBe(createHash("sha256").update("").digest("hex"));
     /* Only the canonical request is hashed. */
