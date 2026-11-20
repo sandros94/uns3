@@ -81,12 +81,7 @@ export async function signRequest(input: SignRequestInput): Promise<SignRequestR
   const credentialScope = `${shortDate}/${region}/${SERVICE}/aws4_request`;
 
   const stringToSign = buildStringToSign(amzDate, credentialScope, canonicalRequestHash);
-  const signature = await calculateSignature(
-    credentials.secretAccessKey,
-    shortDate,
-    region,
-    stringToSign,
-  );
+  const signature = await calculateSignature(credentials, shortDate, region, stringToSign);
   const authorization = buildAuthorizationHeader(
     credentials.accessKeyId,
     credentialScope,
@@ -153,12 +148,7 @@ export async function presignUrl(input: PresignInput): Promise<PresignResult> {
 
   const canonicalRequestHash = await sha256Hex(encoder.encode(canonicalRequest));
   const stringToSign = buildStringToSign(amzDate, credentialScope, canonicalRequestHash);
-  const signature = await calculateSignature(
-    credentials.secretAccessKey,
-    shortDate,
-    region,
-    stringToSign,
-  );
+  const signature = await calculateSignature(credentials, shortDate, region, stringToSign);
   presignedUrl.searchParams.set("X-Amz-Signature", signature);
   /*
    * The signature covers the canonical (RFC 3986) query, so the URL handed back
@@ -185,7 +175,7 @@ async function resolvePayloadHash(input: SignRequestInput, headers: Headers): Pr
   if (existing) return existing;
 
   if (!input.body) {
-    return await sha256Hex(encoder.encode(""));
+    return EMPTY_PAYLOAD_SHA256;
   }
 
   if (typeof input.body === "string") {
@@ -356,30 +346,80 @@ function compareStrings(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/** SHA-256 of an empty payload, a constant there is no point computing. */
+const EMPTY_PAYLOAD_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
 async function calculateSignature(
-  secretAccessKey: string,
+  credentials: Credentials,
   shortDate: string,
   region: string,
   stringToSign: string,
 ): Promise<string> {
-  const kDate = await hmac(`AWS4${secretAccessKey}`, shortDate);
+  const signingKey = await signingKeyFor(credentials, shortDate, region);
+  return toHex(await crypto.subtle.sign("HMAC", signingKey, encoder.encode(stringToSign)));
+}
+
+/** How many signing keys are kept before the cache starts over. */
+const SIGNING_KEY_CACHE_SIZE = 16;
+
+/**
+ * Derived signing keys, by access key, day and region, each beside the secret
+ * it was derived from. Holding the pending derivation rather than its result lets
+ * concurrent requests share one.
+ */
+const signingKeys = new Map<string, { secret: string; key: Promise<CryptoKey> }>();
+
+/**
+ * The SigV4 signing key for a secret, a day and a region, derived once and
+ * then reused. It only changes when one of the three does, so a request costs
+ * one HMAC instead of five.
+ *
+ * The key is held as a non-extractable `CryptoKey`, so its bytes never sit in
+ * script memory. A cached key is used only for the exact secret it came from,
+ * so rotated credentials never sign with a stale one.
+ */
+function signingKeyFor(
+  { accessKeyId, secretAccessKey: secret }: Credentials,
+  shortDate: string,
+  region: string,
+): Promise<CryptoKey> {
+  const id = `${accessKeyId}/${shortDate}/${region}`;
+  const cached = signingKeys.get(id);
+  if (cached?.secret === secret) {
+    return cached.key;
+  }
+
+  if (signingKeys.size >= SIGNING_KEY_CACHE_SIZE) {
+    signingKeys.clear();
+  }
+  const key = deriveSigningKey(secret, shortDate, region);
+  signingKeys.set(id, { secret, key });
+  key.catch(() => {
+    if (signingKeys.get(id)?.key === key) signingKeys.delete(id);
+  });
+  return key;
+}
+
+async function deriveSigningKey(
+  secret: string,
+  shortDate: string,
+  region: string,
+): Promise<CryptoKey> {
+  const kDate = await hmac(encoder.encode(`AWS4${secret}`), shortDate);
   const kRegion = await hmac(kDate, region);
   const kService = await hmac(kRegion, SERVICE);
   const kSigning = await hmac(kService, "aws4_request");
-  const rawSignature = await hmac(kSigning, stringToSign);
-  return toHex(rawSignature);
+  return await importHmacKey(kSigning);
 }
 
-async function hmac(key: string | ArrayBuffer, data: string): Promise<ArrayBuffer> {
-  const keyData = typeof key === "string" ? encoder.encode(key) : key;
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    keyData,
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  return await crypto.subtle.sign("HMAC", cryptoKey, encoder.encode(data));
+async function hmac(key: BufferSource, data: string): Promise<ArrayBuffer> {
+  return await crypto.subtle.sign("HMAC", await importHmacKey(key), encoder.encode(data));
+}
+
+async function importHmacKey(key: BufferSource): Promise<CryptoKey> {
+  return await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, [
+    "sign",
+  ]);
 }
 
 function buildStringToSign(

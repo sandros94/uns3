@@ -147,6 +147,125 @@ describe("signer", () => {
   });
 });
 
+/*
+ * The signing key depends on the secret, the day and the region alone, so it
+ * is derived once and reused: a request then costs one HMAC instead of five.
+ * Each test signs for its own region, so the module-level cache one test fills
+ * never answers for another.
+ */
+describe("signing key", () => {
+  const url = new URL("https://my-bucket.s3.amazonaws.com/test.txt");
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const signed = async (
+    region: string,
+    datetime: Date,
+    secretAccessKey = credentials.secretAccessKey,
+  ): Promise<string> => {
+    const result = await signRequest({
+      method: "GET",
+      url,
+      credentials: { ...credentials, secretAccessKey },
+      region,
+      datetime,
+      unsignedPayload: true,
+    });
+    return result.headers.get("authorization")!;
+  };
+
+  it("derives the key once per day and region", async () => {
+    const day = new Date("2024-03-04T05:06:07Z");
+    await signed("cache-region-1", day);
+    const importKey = vi.spyOn(crypto.subtle, "importKey");
+
+    await signed("cache-region-1", new Date("2024-03-04T23:59:59Z"));
+    expect(importKey).not.toHaveBeenCalled();
+
+    await signed("cache-region-1", new Date("2024-03-05T00:00:00Z"));
+    expect(importKey).toHaveBeenCalled();
+
+    importKey.mockClear();
+    await signed("cache-region-2", day);
+    expect(importKey).toHaveBeenCalled();
+  });
+
+  it("shares one derivation between concurrent requests", async () => {
+    const importKey = vi.spyOn(crypto.subtle, "importKey");
+    const day = new Date("2024-03-04T05:06:07Z");
+    await signed("cache-region-3", day);
+    const once = importKey.mock.calls.length;
+    importKey.mockClear();
+
+    const [first, second] = await Promise.all([
+      signed("cache-region-5", day),
+      signed("cache-region-5", day),
+    ]);
+
+    expect(first).toBe(second);
+    expect(importKey).toHaveBeenCalledTimes(once);
+  });
+
+  it("keeps one key per access key, so two credentials never evict each other", async () => {
+    const day = new Date("2024-03-04T05:06:07Z");
+    const sign = (accessKeyId: string, secretAccessKey: string) =>
+      signRequest({
+        method: "GET",
+        url,
+        credentials: { accessKeyId, secretAccessKey },
+        region: "cache-region-6",
+        datetime: day,
+        unsignedPayload: true,
+      });
+    await sign("AKIDONE", "secret-one");
+    await sign("AKIDTWO", "secret-two");
+    const importKey = vi.spyOn(crypto.subtle, "importKey");
+
+    await sign("AKIDONE", "secret-one");
+    await sign("AKIDTWO", "secret-two");
+
+    expect(importKey).not.toHaveBeenCalled();
+  });
+
+  it("never signs with the key of another secret", async () => {
+    const day = new Date("2024-03-04T05:06:07Z");
+    const original = await signed("cache-region-4", day);
+
+    const rotated = await signed("cache-region-4", day, "a-different-secret");
+
+    expect(rotated).not.toBe(original);
+    const signature = /Signature=([\da-f]+)/.exec(rotated)![1];
+    const key = deriveSigningKey("a-different-secret", "20240304", "cache-region-4", "s3");
+    const canonical = [
+      "GET",
+      "/test.txt",
+      "",
+      `host:${url.host}\nx-amz-content-sha256:UNSIGNED-PAYLOAD\nx-amz-date:20240304T050607Z\n`,
+      "host;x-amz-content-sha256;x-amz-date",
+      "UNSIGNED-PAYLOAD",
+    ].join("\n");
+    const stringToSign = [
+      "AWS4-HMAC-SHA256",
+      "20240304T050607Z",
+      "20240304/cache-region-4/s3/aws4_request",
+      createHash("sha256").update(canonical, "utf8").digest("hex"),
+    ].join("\n");
+    expect(signature).toBe(createHmac("sha256", key).update(stringToSign, "utf8").digest("hex"));
+  });
+
+  it("knows the hash of an empty payload without computing it", async () => {
+    const digest = vi.spyOn(crypto.subtle, "digest");
+
+    const result = await signRequest({ method: "DELETE", url, credentials, region: "us-east-1" });
+
+    expect(result.payloadHash).toBe(createHash("sha256").update("").digest("hex"));
+    /* Only the canonical request is hashed. */
+    expect(digest).toHaveBeenCalledTimes(1);
+  });
+});
+
 function deriveSigningKey(secret: string, date: string, region: string, service: string): Buffer {
   const kDate = createHmac("sha256", `AWS4${secret}`).update(date, "utf8").digest();
   const kRegion = createHmac("sha256", kDate).update(region, "utf8").digest();
