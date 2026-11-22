@@ -3,7 +3,13 @@ import type { MimeTable } from "../types.ts";
 /**
  * Office documents, PDFs, e-books and plain text.
  *
- * Pass it to `createContentTypeResolver` from `uns3/mime`, alone or with other groups.
+ * @example
+ * ```ts
+ * import { createContentTypeResolver } from "uns3/mime";
+ * import { document } from "uns3/mime/document";
+ *
+ * const contentTypeResolver = createContentTypeResolver(document);
+ * ```
  */
 export const document: MimeTable = Object.freeze({
   pdf: "application/pdf",

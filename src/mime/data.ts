@@ -4,7 +4,13 @@ import type { MimeTable } from "../types.ts";
  * Data files: tables, columnar and streaming formats, configuration and
  * geodata.
  *
- * Pass it to `createContentTypeResolver` from `uns3/mime`, alone or with other groups.
+ * @example
+ * ```ts
+ * import { createContentTypeResolver } from "uns3/mime";
+ * import { data } from "uns3/mime/data";
+ *
+ * const contentTypeResolver = createContentTypeResolver(data);
+ * ```
  */
 export const data: MimeTable = Object.freeze({
   parquet: "application/vnd.apache.parquet",

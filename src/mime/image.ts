@@ -3,7 +3,13 @@ import type { MimeTable } from "../types.ts";
 /**
  * Raster and vector images, from the formats every browser shows to camera and editing formats.
  *
- * Pass it to `createContentTypeResolver` from `uns3/mime`, alone or with other groups.
+ * @example
+ * ```ts
+ * import { createContentTypeResolver } from "uns3/mime";
+ * import { image } from "uns3/mime/image";
+ *
+ * const contentTypeResolver = createContentTypeResolver(image);
+ * ```
  */
 export const image: MimeTable = Object.freeze({
   png: "image/png",

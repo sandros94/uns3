@@ -7,66 +7,124 @@ const encoder = new TextEncoder();
 const SERVICE = "s3";
 const UNSIGNED_PAYLOAD = "UNSIGNED-PAYLOAD";
 
-/** Input parameters for SigV4 request signing, including method, URL, credentials, and optional body/headers. */
+/** Options of {@link signRequest}. */
 export interface SignRequestInput {
+  /** The request's method. */
   method: Methods;
+  /** The request's URL, bucket and key included. It is not changed. */
   url: URL;
+  /** Region to sign for. */
   region: string;
+  /** Credentials to sign with. */
   credentials: Credentials;
+  /** Headers to sign and send. `host` is added when missing. */
   headers?: Headers;
+  /** The body, hashed into the signature unless it is a stream or `unsignedPayload` is set. */
   body?: BodyInit | ReadableStream<Uint8Array> | null;
+  /**
+   * Time of the signature. The store refuses one more than 15 minutes away
+   * from its own clock.
+   *
+   * @default new Date()
+   */
   datetime?: Date;
+  /**
+   * Sign the payload as `UNSIGNED-PAYLOAD` instead of hashing the body.
+   *
+   * @default false
+   */
   unsignedPayload?: boolean;
   /**
-   * Where the derived signing key is kept. Defaults to
-   * {@link sharedSigningKeyCache}. `false` derives one per request.
+   * Where the derived signing key is kept. `false` derives one for this call.
+   *
+   * @default sharedSigningKeyCache
    */
   signingKeyCache?: SigningKeyCache | false;
 }
 
-/** Result of a SigV4 signing operation, containing the signed headers and associated metadata. */
+/** What {@link signRequest} resolves with. Send `url` with `headers`. */
 export interface SignRequestResult {
   /**
-   * The URL that was signed, with its query encoded the way SigV4 signs it.
-   * Send this one: `URLSearchParams` writes a space as `+` and a tilde as
-   * `%7E`, which a store that recomputes the signature rejects.
+   * The URL to send, its query encoded the way it was signed. Send this one
+   * rather than your own: `URLSearchParams` writes a space as `+`, which the
+   * store would not match against the signature.
    */
   url: URL;
+  /** The headers to send: yours, plus `authorization`, `x-amz-date` and `x-amz-content-sha256`. */
   headers: Headers;
+  /** SHA-256 of the body in hex, or `UNSIGNED-PAYLOAD`. */
   payloadHash: string;
+  /** Time of the signature, as `YYYYMMDDTHHMMSSZ`. */
   amzDate: string;
+  /** Names of the signed headers, separated by `;`. */
   signedHeaders: string;
 }
 
-/** Input parameters for generating a SigV4 presigned URL, including credentials, expiry, and optional headers. */
+/** Options of {@link presignUrl}. */
 export interface PresignInput {
+  /** The method the URL authorizes. */
   method: Methods;
+  /** The URL to presign, bucket and key included. It is not changed. */
   url: URL;
+  /** Region to sign for. */
   region: string;
+  /** Credentials to sign with. A session token goes in the URL's query. */
   credentials: Credentials;
+  /** Headers to sign. Whoever uses the URL must send them with the same values. */
   headers?: Headers;
+  /**
+   * When the URL starts being valid.
+   *
+   * @default new Date()
+   */
   datetime?: Date;
-  /** URL validity in seconds, an integer from 1 to 604800 (seven days). Defaults to 900. */
+  /**
+   * How long the URL stays valid, in seconds: an integer from 1 to 604800
+   * (seven days).
+   *
+   * @default 900
+   */
   expiresInSeconds?: number;
   /**
-   * Where the derived signing key is kept. Defaults to
-   * {@link sharedSigningKeyCache}. `false` derives one per request.
+   * Where the derived signing key is kept. `false` derives one for this call.
+   *
+   * @default sharedSigningKeyCache
    */
   signingKeyCache?: SigningKeyCache | false;
 }
 
-/** Result of a presigned URL generation, containing the signed URL and associated metadata. */
+/** What {@link presignUrl} resolves with. */
 export interface PresignResult {
+  /** The presigned URL. */
   url: URL;
+  /** Always `UNSIGNED-PAYLOAD`: whoever uses the URL chooses the body. */
   payloadHash: string;
+  /** Time of the signature, as `YYYYMMDDTHHMMSSZ`. */
   amzDate: string;
+  /** Names of the signed headers, separated by `;`. */
   signedHeaders: string;
 }
 
 /**
- * Produces SigV4 signed headers for a request and returns auxiliary metadata.
+ * Signs a request with AWS Signature Version 4 (SigV4), for sending it with
+ * your own `fetch`. Send the returned `url` with the returned `headers`.
  *
- * @param input - Method, URL, credentials, headers, body, and signing options.
+ * @param input - The request to sign and the credentials to sign it with.
+ * @returns The URL and headers to send, and what the signature covers.
+ * @throws {TypeError} When the credentials have no secret, or `signingKeyCache` is not a cache.
+ * @example
+ * ```ts
+ * import { signRequest } from "uns3/signer";
+ *
+ * const { url, headers } = await signRequest({
+ *   method: "GET",
+ *   url: new URL("https://my-bucket.s3.us-east-1.amazonaws.com/hello.txt"),
+ *   region: "us-east-1",
+ *   credentials,
+ *   unsignedPayload: true,
+ * });
+ * const response = await fetch(url, { headers });
+ * ```
  */
 export async function signRequest(input: SignRequestInput): Promise<SignRequestResult> {
   const { credentials, region } = input;
@@ -123,14 +181,25 @@ export async function signRequest(input: SignRequestInput): Promise<SignRequestR
 }
 
 /**
- * Generates a SigV4 presigned URL by appending the signature parameters to the
- * provided URL without mutating the original instance.
+ * Presigns a URL: the result authorizes `method` on that URL until it
+ * expires, with no other credentials. Anyone who has it can use it.
  *
- * The payload is always signed as `UNSIGNED-PAYLOAD`: whoever holds the URL
- * chooses the body.
- *
- * @param input - Method, URL, credentials, headers, and expiry configuration.
+ * @param input - The URL to presign, its method, expiry and credentials.
+ * @returns The presigned URL, and what the signature covers.
  * @throws {RangeError} When `expiresInSeconds` is not an integer from 1 to 604800.
+ * @throws {TypeError} When the credentials have no secret, or `signingKeyCache` is not a cache.
+ * @example
+ * ```ts
+ * import { presignUrl } from "uns3/signer";
+ *
+ * const { url } = await presignUrl({
+ *   method: "GET",
+ *   url: new URL("https://my-bucket.s3.us-east-1.amazonaws.com/report.pdf"),
+ *   region: "us-east-1",
+ *   credentials,
+ *   expiresInSeconds: 3600,
+ * });
+ * ```
  */
 export async function presignUrl(input: PresignInput): Promise<PresignResult> {
   const expires = resolveExpiry(input.expiresInSeconds);
@@ -181,10 +250,9 @@ export async function presignUrl(input: PresignInput): Promise<PresignResult> {
   );
   presignedUrl.searchParams.set("X-Amz-Signature", signature);
   /*
-   * The signature covers the canonical (RFC 3986) query, so the URL handed back
-   * has to carry that encoding rather than `URLSearchParams`' form encoding —
-   * otherwise a presigned URL with a space anywhere in it, `my file.txt`
-   * included, is a URL whose own signature does not cover what it says.
+   * The signature covers the canonical (RFC 3986) query, so the returned URL
+   * uses that encoding, not the form encoding of `URLSearchParams`. Otherwise
+   * a URL with a space in it would not match its own signature.
    */
   finalizeQuery(presignedUrl);
 
@@ -400,19 +468,17 @@ async function calculateSignature(
 }
 
 /**
- * Where derived SigV4 signing keys are kept, so a request costs one HMAC
- * instead of five. A key only changes with its credentials, its day or its
- * region.
+ * Keeps derived signing keys, so signing a request costs one HMAC instead of
+ * five. A key is reused until its credentials, its day or its region change.
  *
- * Every client and signing call uses {@link sharedSigningKeyCache} unless
- * given a cache of its own. A cache is an object the application places
- * wherever its isolation needs it: one per tenant, per department, or per
- * request, and keys never cross between caches. A full cache evicts the key
- * used least recently.
+ * Every client and signing call uses {@link sharedSigningKeyCache} unless you
+ * pass a cache of its own: one per tenant, per department or per request.
+ * Keys never cross between caches. A full cache drops the key used least
+ * recently.
  *
  * Each key is a non-extractable `CryptoKey`, but its entry also holds the
- * secret it was derived from, as long as the entry lives. Clearing or dropping
- * a cache lets go of both.
+ * secret it came from while the entry lives. `delete`, `clear`, or dropping
+ * the cache releases both.
  *
  * @example
  * ```ts
@@ -426,7 +492,7 @@ export class SigningKeyCache {
   readonly #entries = new Map<string, { accessKeyId: string; key: Promise<CryptoKey> }>();
 
   /**
-   * @param options - `size`, the number of keys kept, defaults to 16.
+   * @param options - `size`: how many keys the cache holds, 16 by default.
    * @throws {TypeError} When `options` is not an object.
    * @throws {RangeError} When `size` is not a positive integer.
    */
@@ -443,9 +509,14 @@ export class SigningKeyCache {
 
   /**
    * The signing key for `credentials` on `shortDate` (`YYYYMMDD`) in
-   * `region`, kept or derived into the cache. What the signer calls, so a
-   * cache works with any copy of this module. The pending derivation is what is
-   * kept, so concurrent requests share one, and a failed one is dropped.
+   * `region`, from the cache or derived into it. The signer calls this, so
+   * you only need it to sign by hand. Concurrent calls share one derivation,
+   * and a failed one is not kept.
+   *
+   * @param credentials - Credentials the key is derived from.
+   * @param shortDate - Day of the signature, as `YYYYMMDD`.
+   * @param region - Region to sign for.
+   * @returns A non-extractable HMAC key for signing.
    */
   signingKey(credentials: Credentials, shortDate: string, region: string): Promise<CryptoKey> {
     const { accessKeyId, secretAccessKey } = credentials;
@@ -469,22 +540,28 @@ export class SigningKeyCache {
     return key;
   }
 
-  /** Forgets every key derived for `accessKeyId`, for every secret, day and region. */
+  /**
+   * Drops every key derived for `accessKeyId`, whatever its secret, day or
+   * region. Use it once you revoke that access key.
+   *
+   * @param accessKeyId - The access key whose keys to drop.
+   */
   delete(accessKeyId: string): void {
     for (const [id, entry] of this.#entries) {
       if (entry.accessKeyId === accessKeyId) this.#entries.delete(id);
     }
   }
 
-  /** Forgets every key. */
+  /** Drops every key. */
   clear(): void {
     this.#entries.clear();
   }
 }
 
 /**
- * The cache every client and signing call uses unless given its own. Exported
- * so the application can `delete` a revoked access key from it, or `clear` it.
+ * The cache every client and signing call uses unless you pass one of its
+ * own. Call `sharedSigningKeyCache.delete(accessKeyId)` once you revoke an
+ * access key, or `clear()` it.
  */
 export const sharedSigningKeyCache: SigningKeyCache = /* @__PURE__ */ new SigningKeyCache();
 

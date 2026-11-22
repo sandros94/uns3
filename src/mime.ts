@@ -6,26 +6,32 @@ export { default as common } from "./mime/common.ts";
 const MEDIA_TYPE = /^[a-z0-9][\w!#$&^.+-]*\/[a-z0-9][\w!#$&^.+-]*(?:\s*;.*)?$/i;
 
 /**
- * Builds a content type resolver from the tables given, so a bundle carries
- * only the groups it uses. A later table wins over an earlier one, and the
- * application's own entries are a table like any other.
+ * Builds a content type resolver for `S3Client`'s `contentTypeResolver` from
+ * the tables you pass. Import only the groups you need, and the bundle holds
+ * only those tables. A later table wins over an earlier one, and a record of
+ * your own works like any group.
  *
- * The resolver keeps a caller's explicit type, infers none when told `false`,
- * and otherwise looks up the key's last extension, whatever its case.
+ * The resolver keeps an explicit type, sets none for `false`, and otherwise
+ * looks up the key's last extension, in any case.
  *
- * The groups name each format by its IANA-registered type. Where there is
- * none, or where clients only recognize another, they use the type browsers
- * and tools agree on (`audio/wav`, `video/webm`, `application/x-tar`).
+ * Groups use each format's IANA-registered type. Where none is registered, or
+ * clients only recognize another, they use the type browsers and tools agree
+ * on, such as `audio/wav`, `video/webm` or `application/x-tar`.
  *
  * @param tables - Groups from `uns3/mime/*`, or records of extension to type.
+ * @returns A resolver to pass as `contentTypeResolver`.
  * @throws {TypeError} When an entry is not a media type.
  * @example
  * ```ts
+ * import { S3Client } from "uns3";
  * import { createContentTypeResolver } from "uns3/mime";
- * import image from "uns3/mime/image";
- * import video from "uns3/mime/video";
+ * import { image } from "uns3/mime/image";
+ * import { video } from "uns3/mime/video";
  *
- * const contentTypeResolver = createContentTypeResolver(image, video, { heic: "image/heic" });
+ * const client = new S3Client({
+ *   endpoint,
+ *   contentTypeResolver: createContentTypeResolver(image, video, { heic: "image/heic" }),
+ * });
  * ```
  */
 export function createContentTypeResolver(...tables: MimeTable[]): ContentTypeResolver {

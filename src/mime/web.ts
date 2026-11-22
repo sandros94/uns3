@@ -3,7 +3,13 @@ import type { MimeTable } from "../types.ts";
 /**
  * The formats a website is made of: pages, styles, scripts, data, feeds and the manifest.
  *
- * Pass it to `createContentTypeResolver` from `uns3/mime`, alone or with other groups.
+ * @example
+ * ```ts
+ * import { createContentTypeResolver } from "uns3/mime";
+ * import { web } from "uns3/mime/web";
+ *
+ * const contentTypeResolver = createContentTypeResolver(web);
+ * ```
  */
 export const web: MimeTable = Object.freeze({
   html: "text/html",

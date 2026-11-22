@@ -3,7 +3,13 @@ import type { MimeTable } from "../types.ts";
 /**
  * Font files.
  *
- * Pass it to `createContentTypeResolver` from `uns3/mime`, alone or with other groups.
+ * @example
+ * ```ts
+ * import { createContentTypeResolver } from "uns3/mime";
+ * import { font } from "uns3/mime/font";
+ *
+ * const contentTypeResolver = createContentTypeResolver(font);
+ * ```
  */
 export const font: MimeTable = Object.freeze({
   woff: "font/woff",

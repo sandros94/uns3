@@ -1,29 +1,48 @@
 /**
- * Structured error raised for non-success responses returned by S3. Captures
- * HTTP status codes alongside S3 specific identifiers for easier debugging.
+ * The error `S3Client` throws when the store answers with a failure: a status
+ * not in `expectedStatus`, an error document inside a `200`, or a document
+ * that is not the one requested. A request that never got an answer throws a
+ * plain `Error` instead.
+ *
+ * @example
+ * ```ts
+ * import { S3Error } from "uns3";
+ *
+ * try {
+ *   await client.get({ key: "missing.txt" });
+ * } catch (error) {
+ *   if (error instanceof S3Error && error.code === "NoSuchKey") {
+ *     // the object does not exist
+ *   }
+ * }
+ * ```
  */
 export class S3Error extends Error {
-  /** HTTP status code from the S3 response (e.g., 404, 403, 500). */
+  /** HTTP status of the answer, such as `404`. `200` for an error inside a successful answer. */
   readonly status: number;
-  /** S3 error code string (e.g., `"NoSuchKey"`, `"AccessDenied"`). */
+  /**
+   * S3 error code, such as `"NoSuchKey"` or `"AccessDenied"`. An answer with
+   * no error document, such as every `head`, gets the code its status stands
+   * for, such as `"NotFound"`.
+   */
   readonly code?: string;
-  /** AWS request ID from the `x-amz-request-id` header. */
+  /** Request ID the store assigned, from `x-amz-request-id`. */
   readonly requestId?: string;
-  /** Extended request ID from the `x-amz-id-2` header, useful for AWS support cases. */
+  /** Extended request ID, from `x-amz-id-2`. AWS support asks for both. */
   readonly extendedRequestId?: string;
-  /** Whether this error is considered retriable by the client's retry logic. */
+  /** Whether the client would retry this failure by default. */
   readonly retriable: boolean;
-  /** Seconds to wait before retrying, derived from the `Retry-After` header when present. */
+  /** Seconds the store asked to wait before retrying, from `Retry-After` or `x-amz-retry-after`. */
   readonly retryAfter?: number;
-  /** The S3 resource (key or bucket) that caused the error, if reported. */
+  /** The bucket or key the error is about, when the store names it. */
   readonly resource?: string;
-  /** The region reported in the error response. */
+  /** The region the error document names. */
   readonly region?: string;
-  /** The actual region of the bucket, returned by S3 on `AuthorizationHeaderMalformed` or redirect errors. */
+  /** The bucket's actual region, from `x-amz-bucket-region`, when a request went to the wrong one. */
   readonly bucketRegion?: string;
 
   /**
-   * @param init - Metadata describing the failure returned by S3.
+   * @param init - The failure's message, status and S3 details.
    */
   constructor(init: {
     message: string;

@@ -1,117 +1,168 @@
 import type { SigningKeyCache } from "./signer.ts";
 
+/** A string type in upper or lower case only, such as `"GET"` or `"get"`. */
 export type UppercaseOrLowercase<T extends string> = Uppercase<T> | Lowercase<T>;
+
+/** An HTTP method the signer accepts, in upper or lower case. */
 export type Methods = UppercaseOrLowercase<"GET" | "HEAD" | "POST" | "PUT" | "DELETE">;
 
-/** Static AWS credentials used to sign requests. */
+/**
+ * The credentials requests are signed with.
+ *
+ * @example
+ * ```ts
+ * const credentials: Credentials = {
+ *   accessKeyId: "your_access_key_id",
+ *   secretAccessKey: "your_secret_access_key",
+ * };
+ * ```
+ */
 export type Credentials = {
-  /** AWS access key identifier. */
+  /** Access key ID. */
   accessKeyId: string;
-  /** AWS secret access key used for SigV4 signing. */
+  /** Secret access key. */
   secretAccessKey: string;
-  /** Optional session token for temporary credentials (e.g., STS). */
+  /** Session token of temporary credentials, such as those from AWS STS. */
   sessionToken?: string;
 };
 
-/** A function that returns credentials, either synchronously or as a promise. Useful for credential rotation or fetching from external sources. */
+/**
+ * A function the client calls before every request to get the credentials to
+ * sign it with. Use it for credentials that rotate or come from elsewhere.
+ *
+ * @example
+ * ```ts
+ * const credentials: CredentialsProvider = async () => await vault.read("s3");
+ * ```
+ */
 export type CredentialsProvider = () => Promise<Credentials> | Credentials;
 
-/** Determines how the bucket name is placed in the request URL: `"virtual"` for virtual-hosted style or `"path"` for path-style. */
+/**
+ * Where the bucket name goes in a request URL: `"virtual"` puts it in the host
+ * (`my-bucket.s3.amazonaws.com`), `"path"` in the path
+ * (`s3.amazonaws.com/my-bucket`).
+ */
 export type BucketStyle = "virtual" | "path";
 
 /**
- * Byte range for partial object retrieval (Range header).
+ * The bytes of an object to read. Pass `start`, `end` or both, or `suffix`
+ * alone.
  *
- * Either `start` and/or `end`, or `suffix` alone. A missing `start` reads from
- * the first byte, and a missing `end` reads to the last one.
+ * @example
+ * ```ts
+ * const first: ByteRange = { end: 1023 }; // bytes 0 to 1023
+ * const rest: ByteRange = { start: 1024 }; // byte 1024 to the end
+ * const last: ByteRange = { suffix: 1024 }; // the last 1024 bytes
+ * ```
  */
 export interface ByteRange {
-  /** Zero-based start offset (inclusive). Defaults to `0`. */
+  /**
+   * First byte to read, zero-based.
+   *
+   * @default 0
+   */
   start?: number;
-  /** Zero-based end offset (inclusive). Defaults to the last byte. */
+  /**
+   * Last byte to read, zero-based and inclusive.
+   *
+   * @default the last byte of the object
+   */
   end?: number;
   /** Number of bytes to read from the end of the object. Cannot be combined with `start` or `end`. */
   suffix?: number;
 }
 
-/** Conditional request headers for cache validation and optimistic concurrency. */
+/** Conditions a request only succeeds under. A failed one answers `304` or `412`. */
 export interface ConditionalHeaders {
-  /** Only return the object if its ETag matches one of these values. */
+  /** Succeed only if the object's ETag is one of these. */
   ifMatch?: string | string[];
-  /** Only return the object if its ETag does not match any of these values. */
+  /** Succeed only if the object's ETag is none of these. `"*"` means "only if no object exists". */
   ifNoneMatch?: string | string[];
-  /** Only return the object if it has been modified after this date. */
+  /** Succeed only if the object changed after this date. */
   ifModifiedSince?: Date | string;
-  /** Only return the object if it has not been modified after this date. */
+  /** Succeed only if the object did not change after this date. */
   ifUnmodifiedSince?: Date | string;
 }
 
 /**
- * Controls automatic retry behavior for failed requests.
+ * When and how often a failed request is sent again.
+ *
+ * By default a request is retried on a `429`, a `5xx` other than `501` and
+ * `505`, a throttling or timeout error code, and a failure in transit. A
+ * `ReadableStream` body is never retried, since the first attempt consumed it.
  *
  * @example
  * ```ts
- * const retry: RetryConfig = {
- *   maxAttempts: 3,
- *   baseDelayMs: 200,
- *   jitter: true,
- * };
+ * const retry: RetryConfig = { maxAttempts: 5, baseDelayMs: 200 };
  * ```
  */
 export interface RetryConfig {
-  /** Maximum number of attempts, the initial request included. A positive integer, defaults to `3`. */
+  /**
+   * Attempts in all, the first one included. A positive integer.
+   *
+   * @default 3
+   */
   maxAttempts?: number;
-  /** Base delay in milliseconds between retries, doubled on each subsequent attempt. Defaults to `100`. */
+  /**
+   * Delay in milliseconds before the first retry, doubled for each one after.
+   *
+   * @default 100
+   */
   baseDelayMs?: number;
   /**
    * Longest delay in milliseconds between two attempts, a `Retry-After` from
-   * the store included. Defaults to `20000`.
+   * the store included.
+   *
+   * @default 20000
    */
   maxDelayMs?: number;
-  /** When `true` (the default), adds random jitter to the retry delay to reduce thundering-herd effects. */
+  /**
+   * Randomizes each delay between half and all of it, so clients that failed
+   * together do not retry together.
+   *
+   * @default true
+   */
   jitter?: boolean;
   /**
-   * Custom predicate to decide whether a failed request should be retried.
-   * Receives the response (if any) and the thrown error, once per failed
-   * attempt.
+   * Decides whether a failed attempt is retried, in place of the default
+   * rule. It gets the response, or `undefined` when the request failed in
+   * transit, and the error the attempt failed with. Returning `true` for a
+   * `ReadableStream` body has no effect, and a predicate that throws counts as
+   * `false`.
    *
-   * It is the decision, not a filter on it: the default rule — retry a
-   * `429`, a `5xx` other than `501` and `505`, a throttling or timeout
-   * error code, and a request that failed in transit — is replaced by whatever
-   * this returns. The body is re-sent as given, which is fine for a string, a
-   * buffer or a `Blob`. A `ReadableStream` body is consumed by the first
-   * attempt and is never retried whatever this returns, since there is nothing
-   * left to send. A predicate that throws is read as `false`.
+   * @example
+   * ```ts
+   * const retriable = (response?: Response) => !response || response.status >= 500;
+   * ```
    */
   retriable?: (res: Response | undefined, err: unknown) => boolean;
 }
 
 /**
- * Configures request body integrity checking.
+ * Integrity checksums on uploads. The store verifies the checksum and refuses
+ * a body that does not match it.
  *
  * @example
  * ```ts
- * const checksum: ChecksumConfig = {
- *   algorithm: "crc32c",
- *   requireOnPut: true,
- * };
+ * const checksum: ChecksumConfig = { algorithm: "crc32c", requireOnPut: true };
  * ```
  */
 export interface ChecksumConfig {
-  /** Hash algorithm used for checksum computation. `"none"` disables checksums. */
+  /** Algorithm of the checksum sent with each `put` and `uploadPart` body. `"none"` sends none. */
   algorithm: "none" | "sha256" | "crc32c";
   /**
-   * The checksum is computed for every `put` and `uploadPart` body that can
-   * be hashed. A `ReadableStream`, or a Blob over 16 MiB, cannot be, and goes
-   * out without one. With `requireOnPut`, such a body is refused instead, and
-   * `initiateMultipart` declares the algorithm, since every part is then bound
-   * to carry it. A checksum header the caller sets is always kept as it is.
+   * Refuse a body that cannot be hashed, a `ReadableStream` or a Blob over
+   * 16 MiB, instead of sending it without a checksum. `initiateMultipart`
+   * then also declares the algorithm, since every part carries it. A checksum
+   * header you set yourself is always sent as it is.
+   *
+   * @default false
    */
   requireOnPut?: boolean;
 }
 
 /**
- * Configuration for creating an {@link S3Client} instance.
+ * Options of an {@link S3Client}.
  *
  * @example
  * ```ts
@@ -119,302 +170,315 @@ export interface ChecksumConfig {
  *   endpoint: "https://s3.us-east-1.amazonaws.com",
  *   region: "us-east-1",
  *   credentials: {
- *     accessKeyId: "AKIA...",
- *     secretAccessKey: "wJal...",
+ *     accessKeyId: "your_access_key_id",
+ *     secretAccessKey: "your_secret_access_key",
  *   },
  *   defaultBucket: "my-bucket",
  * };
  * ```
  */
 export interface S3ClientConfig {
-  /** S3-compatible endpoint URL (e.g., `"https://s3.us-east-1.amazonaws.com"`). */
+  /** Endpoint of the store, such as `"https://s3.us-east-1.amazonaws.com"`. */
   endpoint: string;
-  /** Signing region. Defaults to `"auto"` — acceptable for most S3-compatible providers; AWS buckets should specify the actual region. */
+  /**
+   * Region requests are signed for. S3-compatible stores accept `"auto"`,
+   * AWS needs the bucket's region.
+   *
+   * @default "auto"
+   */
   region?: string;
-  /** Static credentials or an async provider function for request signing. */
+  /** Credentials to sign with, or a function returning them. Leave it out to send requests unsigned. */
   credentials?: Credentials | CredentialsProvider;
-  /** Bucket name used when individual requests omit `bucket`. */
+  /** Bucket of every request that names none. */
   defaultBucket?: string;
   /**
-   * URL style for bucket addressing. Defaults to `"virtual"`, which falls back
-   * to path style for buckets a subdomain cannot reach: names that are not
+   * Where the bucket name goes in a request URL. `"virtual"` falls back to
+   * path style where a subdomain cannot work: bucket names that are not
    * DNS-compatible, dotted names over HTTPS, and IP or `localhost` endpoints.
+   *
+   * @default "virtual"
    */
   bucketStyle?: BucketStyle;
-  /** Custom `fetch` implementation; defaults to the global `fetch`. */
+  /**
+   * The `fetch` requests are sent with.
+   *
+   * @default globalThis.fetch
+   */
   fetch?: typeof fetch;
   /**
-   * Infers a content type from an object key. Defaults to the `common` group
-   * from `uns3/mime`. Build one from the groups a bucket holds with
-   * `createContentTypeResolver`.
+   * Infers the content type of an upload from its key. Build one with
+   * `createContentTypeResolver` from `uns3/mime`.
+   *
+   * @default the `common` group from `uns3/mime`
    */
   contentTypeResolver?: ContentTypeResolver;
-  /** Manual clock skew offset in milliseconds applied to request signatures. */
+  /**
+   * Milliseconds added to the local clock when signing. The client also
+   * corrects its clock once the store's is five minutes or more away.
+   *
+   * @default 0
+   */
   clockSkewMs?: number;
-  /** Retry configuration for transient failures. */
+  /** When and how often a failed request is sent again. */
   retry?: RetryConfig;
   /**
-   * Where this client keeps derived signing keys. Defaults to
-   * `sharedSigningKeyCache`, which every client shares. Pass a
-   * {@link SigningKeyCache} of its own to isolate it, one per tenant or per
-   * request, or `false` to derive a key for every request.
+   * Where the client keeps derived signing keys. Pass a `SigningKeyCache` of
+   * its own to isolate the client, or `false` to derive a key on every
+   * request.
+   *
+   * @default sharedSigningKeyCache from `uns3/signer`
    */
   signingKeyCache?: SigningKeyCache | false;
   /**
-   * Deadline in milliseconds of each attempt that moves no object bytes
-   * (`head`, `del`, `list` and the multipart calls but `uploadPart`), up to
-   * the end of its response. Also bounds reading an error body, whatever the
-   * request. `false` disables it. Defaults to `30000`.
+   * Deadline in milliseconds of each attempt of `head`, `del`, `list` and the
+   * multipart calls but `uploadPart`, up to the end of the response. It also
+   * bounds reading an error body, whatever the request. A timed-out attempt
+   * is retried. `false` sets no deadline.
+   *
+   * @default 30000
    */
   timeoutMs?: number | false;
-  /** Checksum configuration for request body integrity. */
+  /** Integrity checksums on uploads. */
   checksum?: ChecksumConfig;
 }
 
-/** Common fields shared by all S3 operation parameter types. */
+/** Options every request takes. */
 export interface BaseRequest {
-  /** Target bucket name; falls back to `S3ClientConfig.defaultBucket` if omitted. */
+  /** Bucket of the request. Defaults to the client's `defaultBucket`. */
   bucket?: string;
-  /** Object key (path) within the bucket. */
+  /** Object key. */
   key?: string;
-  /** Additional HTTP headers merged into the request. */
+  /** Headers to send, in addition to the ones the client sets. */
   headers?: HeadersInit;
-  /** Extra query string parameters appended to the request URL. */
+  /** Query parameters to send. A typed option of the same name wins over one here. */
   query?: Record<
     string,
     string | number | boolean | undefined | Array<string | number | boolean | undefined>
   >;
   /**
-   * Expected HTTP status code(s); a mismatch throws an `S3Error`. Replaces the
-   * calling method's default list rather than adding to it, so asking for `200`
-   * alone makes a `304` an error. Ignored by `getSignedUrl`, which sends nothing.
+   * Statuses that count as success. Any other throws an `S3Error`. Your list
+   * replaces the method's default rather than adding to it.
+   *
+   * @example
+   * ```ts
+   * await client.put({ key: "a.txt", body: "hi", expectedStatus: [200, 201] });
+   * ```
    */
   expectedStatus?: number | number[];
-  /** Abort signal to cancel the request, retries included. */
+  /** Aborts the request, retries included. The request rejects with the signal's reason. */
   signal?: AbortSignal;
   /**
-   * Deadline in milliseconds of each attempt, up to the response it is
-   * answered with. A timed-out attempt is retried like any failed one.
-   * Replaces the client's `timeoutMs` for this request. `get`, `put` and
-   * `uploadPart` have no deadline unless one is set here, since a large
-   * transfer has no honest default. `false` disables it.
+   * Deadline in milliseconds of each attempt, up to the response. A timed-out
+   * attempt is retried. Replaces the client's `timeoutMs` for this request.
+   * `false` sets no deadline.
+   *
+   * @default the client's `timeoutMs`, none for `get`, `put` and `uploadPart`
    */
   timeoutMs?: number | false;
 }
 
-/** Parameters for requests that operate on a single object, including conditional and range headers. */
+/** Options of a request on one object. */
 export interface ObjectRequest extends BaseRequest, ConditionalHeaders {
-  /** Object key (required). */
+  /** Object key. */
   key: string;
-  /** Byte range for partial reads. */
+  /** Bytes of the object to read. The response is a `206`. */
   range?: ByteRange;
 }
 
-/** Parameters for `get`. */
+/** Options of `get`. */
 export type GetObjectParams = ObjectRequest;
 
-/** Parameters for `head`. */
+/** Options of `head`. */
 export type HeadObjectParams = ObjectRequest;
 
-/** Parameters for `put`. */
+/** Options of `put`. */
 export interface PutObjectParams
   extends BaseRequest, Pick<ConditionalHeaders, "ifMatch" | "ifNoneMatch"> {
-  /** Object key to write. */
+  /** Object key. */
   key: string;
   /**
-   * Request body. A plain object or an array is sent as JSON. Any other
-   * object that is not a body `fetch` can send as bytes is refused with a
-   * `TypeError`, rather than sent as its string form.
-   *
-   * A `ReadableStream` is sent as it arrives and is never retried: it is
-   * consumed by the attempt that sent it, so there is no second attempt to
-   * make. It is also signed as `UNSIGNED-PAYLOAD` and cannot be checksummed —
-   * hashing it would mean buffering it, which is the thing a stream is for
-   * avoiding.
+   * The object's content. A plain object or an array is sent as JSON. A
+   * `ReadableStream` is sent as it arrives, without a payload signature or a
+   * checksum, and is never retried.
    */
   body: BodyInit | ReadableStream<Uint8Array> | null | Record<string, unknown> | unknown[];
   /**
-   * Declares the body's size in bytes, which is what makes a streamed upload
-   * work everywhere. A `ReadableStream` with no length goes out as
-   * `Transfer-Encoding: chunked`, and RustFS — like AWS S3 — refuses that with
-   * `411 MissingContentLength`; declaring the length makes the runtime send a
-   * fixed-length body instead. Not validated against the actual body size — the
-   * caller is responsible for accuracy.
-   *
-   * The header is signed with the rest of the request, so a wrong value is not
-   * a wrong number: too small and the store rejects the signature or the body,
-   * too large and the connection waits for bytes that never come and surfaces
-   * as a bare `fetch failed`. Pass the body's byte length or leave it out.
+   * The body's size in bytes. Pass it with a `ReadableStream`: AWS S3 and
+   * other stores refuse a body of unknown length with `411`. It is signed, so
+   * it must be exact: a wrong length fails the request.
    */
   contentLength?: number;
   /**
-   * Explicit MIME type, ahead of a `content-type` header, the body's own type
-   * (a Blob's, or JSON for a plain object) and inference from the key, in that
-   * order. `false` sends no content type at all.
+   * The object's content type. `false` sends none.
+   *
+   * @default a `content-type` header, else the body's own type (a Blob's, or
+   * JSON for a plain object), else the type the client's resolver infers from
+   * the key
    */
   contentType?: string | false;
-  /** Value for the `Cache-Control` header. */
+  /** The object's `Cache-Control`. */
   cacheControl?: string;
-  /** Value for the `Content-Disposition` header. */
+  /** The object's `Content-Disposition`. */
   contentDisposition?: string;
-  /** Value for the `Content-Encoding` header (e.g., `"gzip"`). */
+  /** The object's `Content-Encoding`, such as `"gzip"`. */
   contentEncoding?: string;
 }
 
-/** Parameters for `del`. */
+/** Options of `del`. */
 export interface DeleteObjectParams extends BaseRequest {
-  /** Object key to delete. */
+  /** Object key. */
   key: string;
 }
 
-/** Parameters for initiating a multipart upload. */
+/** Options of `initiateMultipart`. */
 export interface MultipartInitParams extends BaseRequest {
-  /** Object key for the multipart upload. */
+  /** Key of the object the upload creates. */
   key: string;
   /**
-   * Explicit MIME type, ahead of a `content-type` header and inference from the
-   * key, in that order. `false` sends no content type at all.
+   * The object's content type. `false` sends none.
+   *
+   * @default a `content-type` header, else the type the client's resolver
+   * infers from the key
    */
   contentType?: string | false;
-  /** Value for the `Cache-Control` header. */
+  /** The object's `Cache-Control`. */
   cacheControl?: string;
-  /** Value for the `Content-Disposition` header. */
+  /** The object's `Content-Disposition`. */
   contentDisposition?: string;
-  /** Value for the `Content-Encoding` header. */
+  /** The object's `Content-Encoding`. */
   contentEncoding?: string;
 }
 
-/** Result of initiating a multipart upload. */
+/** What `initiateMultipart` resolves with. */
 export interface MultipartInitResult {
-  /** Server-assigned upload identifier used in subsequent part and completion requests. */
+  /** ID of the upload, for `uploadPart`, `completeMultipart` and `abortMultipart`. */
   uploadId: string;
 }
 
-/** Parameters for uploading a single part in a multipart upload. */
+/** Options of `uploadPart`. */
 export interface UploadPartParams extends BaseRequest {
-  /** Object key matching the initiated upload. */
+  /** Key of the upload's object. */
   key: string;
-  /** Upload identifier returned by `initiateMultipart`. */
+  /** ID `initiateMultipart` returned. */
   uploadId: string;
-  /** 1-based part number (must be unique within the upload). */
+  /** The part's position, an integer from 1 to 10000. */
   partNumber: number;
-  /** Body content for this part. */
+  /** The part's content. Every part but the last must be at least 5 MiB on AWS S3. */
   body: BodyInit | ReadableStream<Uint8Array> | null;
   /**
-   * Hint for providers that require an explicit `Content-Length` header. Not
-   * validated against the actual body size — the caller is responsible for
-   * accuracy.
-   *
-   * The header is signed with the rest of the request, so a wrong value is not
-   * a wrong number: too small and the store rejects the signature or the body,
-   * too large and the connection waits for bytes that never come and surfaces
-   * as a bare `fetch failed`. Pass the body's byte length or leave it out.
+   * The body's size in bytes. Pass it with a `ReadableStream`. It is signed,
+   * so it must be exact: a wrong length fails the request.
    */
   contentLength?: number;
 }
 
-/** Result of a single part upload. */
+/** What `uploadPart` resolves with. Pass both on to `completeMultipart`. */
 export interface UploadPartResult {
-  /** ETag of this part as a quoted entity tag, required when completing the upload. */
+  /** The part's ETag, quoted (`"abc123"`). */
   etag: string;
-  /** The part's checksum as the store reported it, when a checksum is configured. Pass it on to the completion. */
+  /** The part's checksum, when the client has a checksum algorithm configured. */
   checksum?: string;
 }
 
-/** Parameters for completing a multipart upload. */
+/** Options of `completeMultipart`. */
 export interface CompleteMultipartParams
   extends BaseRequest, Pick<ConditionalHeaders, "ifMatch" | "ifNoneMatch"> {
-  /** Object key matching the initiated upload. */
+  /** Key of the upload's object. */
   key: string;
-  /** Upload identifier returned by `initiateMultipart`. */
+  /** ID `initiateMultipart` returned. */
   uploadId: string;
-  /**
-   * The uploaded parts with their part numbers and ETags, and the checksum
-   * each one's upload reported, if any.
-   */
+  /** Every uploaded part, in any order, as `uploadPart` resolved them. */
   parts: Array<{ partNumber: number; etag: string; checksum?: string }>;
 }
 
-/** Result of completing a multipart upload. */
+/** What `completeMultipart` resolves with. */
 export interface CompleteMultipartResult {
-  /** ETag of the assembled object as a quoted entity tag. */
+  /** The object's ETag, quoted (`"abc123-2"`). */
   etag: string;
-  /** URL of the assembled object, when the store reports one. */
+  /** URL of the object, when the store reports one. */
   location?: string;
 }
 
-/** Parameters for aborting an in-progress multipart upload. */
+/** Options of `abortMultipart`. */
 export interface AbortMultipartParams extends BaseRequest {
-  /** Object key matching the initiated upload. */
+  /** Key of the upload's object. */
   key: string;
-  /** Upload identifier to abort. */
+  /** ID `initiateMultipart` returned. */
   uploadId: string;
 }
 
-/** Parameters for listing objects (ListObjectsV2). */
+/** Options of `list`. */
 export interface ListObjectsV2Params extends BaseRequest {
-  /** Only include keys that begin with this prefix. */
+  /** List only keys that start with this. */
   prefix?: string;
-  /** Separator used to group keys into common prefixes (typically `"/"`). */
+  /** Group keys up to this character into `commonPrefixes`, such as `"/"` for folders. */
   delimiter?: string;
-  /** Token from a previous truncated response to fetch the next page. */
+  /** `nextContinuationToken` of the previous page. */
   continuationToken?: string;
-  /** Only include keys that sort after this one. */
+  /** List only keys that sort after this one. */
   startAfter?: string;
-  /** Maximum number of keys to return per request. */
+  /** Most keys a page holds. Stores cap it, AWS S3 at 1000. */
   maxKeys?: number;
 }
 
-/** Parsed response from a ListObjectsV2 request. */
+/** What `list` resolves with. */
 export interface ListObjectsV2Response {
-  /** Objects matching the list request. */
+  /** The objects of this page. */
   contents: Array<{
     /** Object key. */
     key: string;
-    /** Object size in bytes. */
+    /** Size in bytes. */
     size: number;
-    /** Object ETag as a quoted entity tag, the form a HEAD reports, if available. */
+    /** ETag, quoted (`"abc123"`), when the store lists one. */
     etag: string | undefined;
-    /** ISO 8601 timestamp of the last modification. */
+    /** Time of the last change, in ISO 8601. */
     lastModified: string;
-    /** Storage class (e.g., `"STANDARD"`, `"GLACIER"`). */
+    /** Storage class, such as `"STANDARD"`. */
     storageClass?: string;
   }>;
-  /** Rolled-up key prefixes when a `delimiter` was used. */
+  /** Keys grouped up to the `delimiter`, such as `"photos/"`. */
   commonPrefixes: string[];
-  /** `true` when there are more results available via `nextContinuationToken`. */
+  /** Whether more pages follow. */
   isTruncated: boolean;
-  /** Pass this value as `continuationToken` to fetch the next page of results. */
+  /** Pass it as `continuationToken` for the next page. */
   nextContinuationToken?: string;
   /**
-   * Where a store that answered V1-style pagination resumes: its `NextMarker`,
-   * or the last name listed when a truncated page sent none (V1 sends one only
-   * with a delimiter). Several S3-compatible stores ignore `list-type=2` and
-   * page this way, in which case `isTruncated` is `true` and
-   * `nextContinuationToken` is absent.
-   *
-   * It is not a continuation token and does not work as one: pass it back as
-   * `query: { marker }` rather than as `continuationToken`.
+   * Where the next page starts on a store that pages the older (V1) way, with
+   * no continuation token. Pass it as `query: { marker }`, not as
+   * `continuationToken`.
    */
   nextMarker?: string;
 }
 
-/** HTTP methods that can be used for presigned URLs. */
+/** The HTTP methods a presigned URL can authorize. */
 export type PresignMethod = "GET" | "PUT" | "HEAD" | "DELETE";
 
-/** Parameters for generating a presigned URL. */
+/** Options of `getSignedUrl`. */
 export interface PresignParams extends BaseRequest {
-  /** HTTP method the presigned URL will authorize. */
+  /** The method the URL authorizes. */
   method: PresignMethod;
-  /** URL validity in seconds, an integer from 1 to 604800 (seven days). Defaults to 900. */
+  /**
+   * How long the URL stays valid, in seconds: an integer from 1 to 604800
+   * (seven days).
+   *
+   * @default 900
+   */
   expiresInSeconds?: number;
 }
 
 /**
- * File extensions, without the dot, mapped to the media type each stands for.
- * What `createContentTypeResolver` from `uns3/mime` is built from.
+ * File extensions, without the dot, mapped to their media types.
+ *
+ * @example
+ * ```ts
+ * const table: MimeTable = { heic: "image/heic", glb: "model/gltf-binary" };
+ * ```
  */
 export type MimeTable = Readonly<Record<string, string>>;
 
-/** Resolves a content type from an object key and an optional explicit value. Return `undefined` to omit the header. */
+/**
+ * Infers a content type from an object key. It gets the caller's explicit type
+ * too: a string to keep, or `false` for none. Returning `undefined` sends no
+ * content type.
+ */
 export type ContentTypeResolver = (key: string, explicit?: string | false) => string | undefined;

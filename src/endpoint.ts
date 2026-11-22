@@ -8,23 +8,39 @@ type EndpointStyle<T extends BucketStyle = BucketStyle> = T extends "virtual"
     ? { bucket?: string; bucketStyle: "path" }
     : never;
 
+/**
+ * Options of {@link buildRequestUrl}. Virtual-hosted style needs a `bucket`,
+ * path style can leave it out to address the endpoint itself.
+ */
 export type EndpointInput<T extends BucketStyle = BucketStyle> = EndpointStyle<T> & {
+  /** Object key, or `""` for a request on the bucket itself. */
   key: string;
+  /** Endpoint of the store, such as `"https://s3.us-east-1.amazonaws.com"`. */
   endpoint: string;
 };
 
 /**
- * Builds a request URL for the given bucket/key combo respecting the desired
- * bucket addressing style.
+ * Builds the URL of a request on a bucket or an object.
  *
- * Virtual-hosted style falls back to path style whenever the bucket cannot be
- * reached as a subdomain of the endpoint: a name that is not DNS-compatible, a
- * dotted name over `https:` (a wildcard certificate covers a single label), or
- * an endpoint addressed by IP literal or as `localhost`.
+ * Virtual-hosted style falls back to path style where the bucket cannot be a
+ * subdomain of the endpoint: a name that is not DNS-compatible, a dotted name
+ * over `https:`, and an IP or `localhost` endpoint.
  *
- * Throws on a bucket named `.` or `..`, which URL parsing removes from a path.
+ * @param input - Endpoint, bucket style, bucket and key.
+ * @returns The request URL, the key encoded the way S3 expects it.
+ * @throws {Error} When a virtual-hosted request has no bucket, or the bucket or key contains a `.` or `..` path segment.
+ * @example
+ * ```ts
+ * import { buildRequestUrl } from "uns3/endpoint";
  *
- * @param input - Endpoint components including style, bucket, and key.
+ * const url = buildRequestUrl({
+ *   endpoint: "https://s3.us-east-1.amazonaws.com",
+ *   bucketStyle: "virtual",
+ *   bucket: "my-bucket",
+ *   key: "photos/cat 1.jpg",
+ * });
+ * // https://my-bucket.s3.us-east-1.amazonaws.com/photos/cat%201.jpg
+ * ```
  */
 export function buildRequestUrl<T extends BucketStyle>(input: EndpointInput<T>): URL {
   const { endpoint, bucketStyle, bucket, key } = input;
@@ -53,24 +69,22 @@ export function buildRequestUrl<T extends BucketStyle>(input: EndpointInput<T>):
 }
 
 /**
- * Encodes an S3 object key using RFC 3986 rules while preserving path
- * separators and every empty segment, leading, inner and trailing alike. A key
- * is sent exactly as written: `/foo` and `foo` are two different objects.
+ * Percent-encodes an object key for a URL path (RFC 3986), keeping every `/`
+ * and every empty segment. `/foo` and `foo` stay two different keys.
  *
- * Throws on a key containing a `.` or `..` path segment. S3's key space is
- * flat, so `dir/../evil.txt` is a name; a URL's path is not, and every WHATWG
- * URL parser — which is every `URL`, every `Request`, and therefore every
- * `fetch` — removes dot segments while parsing. Such a key used to be rewritten
- * on its way out: `dir/../evil.txt` was silently stored as `evil.txt`, and
- * `users/a/../b/x` silently left the prefix it was scoped to. Percent-encoding
- * does not rescue it either, because the specification counts `%2e` as a dot
- * for exactly this purpose. A fetch-based client cannot put such a key on the
- * wire, so it says so instead of writing somewhere else.
+ * A key with a `.` or `..` path segment, such as `dir/../evil.txt`, cannot
+ * be sent: every URL parser removes such segments, so the request would write
+ * to another key. Dots inside a name, such as `a.b` or `c..d`, are kept.
  *
- * Only a whole segment of one or two dots is affected; dots inside a name
- * (`a.b`, `c..d`, `...`) are ordinary characters and pass through untouched.
+ * @param key - The object key.
+ * @returns The key, encoded for a URL path.
+ * @throws {Error} When the key contains a `.` or `..` path segment.
+ * @example
+ * ```ts
+ * import { encodeS3Key } from "uns3/endpoint";
  *
- * @param key - Raw key as provided by callers.
+ * encodeS3Key("photos/cat 1.jpg"); // "photos/cat%201.jpg"
+ * ```
  */
 export function encodeS3Key(key: string): string {
   if (!key) return "";

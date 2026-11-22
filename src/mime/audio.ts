@@ -3,7 +3,13 @@ import type { MimeTable } from "../types.ts";
 /**
  * Audio files and streams.
  *
- * Pass it to `createContentTypeResolver` from `uns3/mime`, alone or with other groups.
+ * @example
+ * ```ts
+ * import { createContentTypeResolver } from "uns3/mime";
+ * import { audio } from "uns3/mime/audio";
+ *
+ * const contentTypeResolver = createContentTypeResolver(audio);
+ * ```
  */
 export const audio: MimeTable = Object.freeze({
   mp3: "audio/mpeg",

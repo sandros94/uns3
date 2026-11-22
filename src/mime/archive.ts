@@ -3,7 +3,13 @@ import type { MimeTable } from "../types.ts";
 /**
  * Archives and compressed files.
  *
- * Pass it to `createContentTypeResolver` from `uns3/mime`, alone or with other groups.
+ * @example
+ * ```ts
+ * import { createContentTypeResolver } from "uns3/mime";
+ * import { archive } from "uns3/mime/archive";
+ *
+ * const contentTypeResolver = createContentTypeResolver(archive);
+ * ```
  */
 export const archive: MimeTable = Object.freeze({
   "zip": "application/zip",

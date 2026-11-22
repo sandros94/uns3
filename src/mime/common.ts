@@ -1,9 +1,16 @@
 import type { MimeTable } from "../types.ts";
 
 /**
- * The types most objects in a bucket are: web pages and their assets, common
- * images, audio and video, PDFs and archives. What `S3Client` infers from a key
- * unless given a resolver of its own.
+ * Web pages and their assets, the image, audio and video formats browsers
+ * play, PDFs, and zip and gzip archives: 31 extensions. `S3Client` infers
+ * from this group unless you pass a resolver of your own.
+ *
+ * @example
+ * ```ts
+ * import { common, createContentTypeResolver } from "uns3/mime";
+ *
+ * const contentTypeResolver = createContentTypeResolver(common, { heic: "image/heic" });
+ * ```
  */
 export const common: MimeTable = Object.freeze({
   html: "text/html",

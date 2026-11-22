@@ -26,7 +26,7 @@ export function uriEncode(input: string, encodeSlash?: boolean): string {
  * `application/x-www-form-urlencoded`, where a space is `+`, a tilde is `%7E`
  * and a star is bare. Each of those three is a disagreement with the canonical
  * form, and each is a `SignatureDoesNotMatch` from a store that recomputes the
- * canonical request — which AWS does.
+ * canonical request, as AWS does.
  *
  * @param entries - Key/value pairs, emitted in the order they are iterated.
  */

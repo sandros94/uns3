@@ -86,7 +86,7 @@ export function applyQuery(url: URL, query: BaseRequest["query"]): void {
  * Rewrites a URL's query string so the bytes that go on the wire are the bytes
  * SigV4 signs, and returns the same (mutated) instance.
  *
- * Parameters keep the order they were added in — only the encoding changes, and
+ * Parameters keep the order they were added in. Only the encoding changes, and
  * the decoded pairs are untouched, so the canonical query the signer derives
  * from `url.searchParams` describes exactly what is sent. The signer sorts its
  * own copy, as the specification requires; the wire does not have to.

@@ -3,7 +3,13 @@ import type { MimeTable } from "../types.ts";
 /**
  * Video files, and the playlists and segments of adaptive streaming. `ts` is an MPEG transport stream segment here, not TypeScript.
  *
- * Pass it to `createContentTypeResolver` from `uns3/mime`, alone or with other groups.
+ * @example
+ * ```ts
+ * import { createContentTypeResolver } from "uns3/mime";
+ * import { video } from "uns3/mime/video";
+ *
+ * const contentTypeResolver = createContentTypeResolver(video);
+ * ```
  */
 export const video: MimeTable = Object.freeze({
   "mp4": "video/mp4",

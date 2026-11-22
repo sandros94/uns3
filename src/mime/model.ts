@@ -3,7 +3,13 @@ import type { MimeTable } from "../types.ts";
 /**
  * 3D models and scenes.
  *
- * Pass it to `createContentTypeResolver` from `uns3/mime`, alone or with other groups.
+ * @example
+ * ```ts
+ * import { createContentTypeResolver } from "uns3/mime";
+ * import { model } from "uns3/mime/model";
+ *
+ * const contentTypeResolver = createContentTypeResolver(model);
+ * ```
  */
 export const model: MimeTable = Object.freeze({
   "glb": "model/gltf-binary",

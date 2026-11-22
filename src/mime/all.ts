@@ -10,8 +10,17 @@ import archive from "./archive.ts";
 import model from "./model.ts";
 
 /**
- * Every group, plus the long tail of IANA-registered types no group covers.
- * For demos, tests, and wherever bundle size does not matter.
+ * Every group, plus the IANA-registered types no group covers: 467
+ * extensions, about 12 KB minified. Use it for demos and tests, or where
+ * bundle size does not matter.
+ *
+ * @example
+ * ```ts
+ * import { createContentTypeResolver } from "uns3/mime";
+ * import { all } from "uns3/mime/all";
+ *
+ * const contentTypeResolver = createContentTypeResolver(all);
+ * ```
  */
 export const all: MimeTable = Object.freeze({
   "3g2": "video/3gpp2",

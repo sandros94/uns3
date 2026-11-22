@@ -100,9 +100,26 @@ const MAX_INLINE_CHECKSUM_BYTES = 16 * 1024 * 1024;
 const CLOCK_SKEW_THRESHOLD_MS = 5 * 60 * 1000;
 
 /**
- * High-level S3 interface that speaks the REST protocol with SigV4 signing
- * while remaining runtime agnostic. The client never buffers response bodies
- * implicitly and relies entirely on Fetch/Web Crypto primitives.
+ * A client for an S3 bucket: AWS S3 or any S3-compatible store.
+ *
+ * Requests are signed with AWS Signature Version 4 (SigV4) and sent with
+ * `fetch`. Transient failures are retried. `get` and `head` resolve with the
+ * `Response`, so you read its body as a stream or all at once.
+ *
+ * @example
+ * ```ts
+ * import { S3Client } from "uns3";
+ *
+ * const client = new S3Client({
+ *   endpoint: "https://s3.us-east-1.amazonaws.com",
+ *   region: "us-east-1",
+ *   credentials: {
+ *     accessKeyId: "your_access_key_id",
+ *     secretAccessKey: "your_secret_access_key",
+ *   },
+ *   defaultBucket: "my-bucket",
+ * });
+ * ```
  */
 export class S3Client {
   private readonly region: string;
@@ -120,9 +137,10 @@ export class S3Client {
     Pick<RetryConfig, "retriable">;
 
   /**
-   * Creates a new client instance.
-   *
-   * @param config - Connection, credential, and runtime overrides for S3.
+   * @param config - Endpoint, credentials and options of the client.
+   * @throws {TypeError} When `signingKeyCache` is neither a `SigningKeyCache` nor `false`.
+   * @throws {RangeError} When a `retry` option or `timeoutMs` is out of range.
+   * @throws {Error} When the runtime has no `fetch` and `config.fetch` is not set.
    */
   constructor(config: S3ClientConfig) {
     this.region = config.region ?? "auto";
@@ -148,23 +166,24 @@ export class S3Client {
   }
 
   /**
-   * Executes a GET Object request and returns the raw {@link Response}. For
-   * streamed consumption read {@link Response.body}, which this client never
-   * buffers on your behalf.
+   * Reads an object. Resolves with the `Response` once its headers arrive, so
+   * read the body as a stream with `response.body`, or all at once with
+   * `response.text()`, `json()` or `arrayBuffer()`.
    *
-   * Supports conditional requests via `ifMatch`, `ifNoneMatch`, `ifModifiedSince`,
-   * and `ifUnmodifiedSince`. When the object hasn't changed, S3 may return a
-   * `304 Not Modified` response with no body, which is treated as success.
+   * Succeeds with `200`, `206` for a `range`, and `304` when a condition
+   * says the object did not change.
    *
-   * Accepts `200`, `206`, and `304` by default — `206 Partial Content` because a
-   * `range` makes it the correct answer. Set `expectedStatus` to replace that
-   * list entirely.
-   *
-   * @param params - Request configuration including bucket and key.
+   * @param params - Key, and optionally a range, conditions and request options.
+   * @returns The store's response, its body unread.
+   * @throws {S3Error} When the store answers with a status not in `expectedStatus`.
+   * @throws {Error} When the request fails in transit on every attempt. Its `cause` is the last failure.
+   * @throws When `signal` aborts, the signal's reason.
    * @example
    * ```ts
-   * const response = await client.get({ bucket: "my-bucket", key: "hello.txt" });
+   * const response = await client.get({ key: "hello.txt" });
    * const text = await response.text();
+   *
+   * const firstKiB = await client.get({ key: "big.bin", range: { end: 1023 } });
    * ```
    */
   async get(params: GetObjectParams): Promise<Response> {
@@ -175,21 +194,21 @@ export class S3Client {
   }
 
   /**
-   * Issues a HEAD Object call returning metadata-only responses.
+   * Reads an object's metadata: its headers, without the body.
    *
-   * Supports conditional requests via `ifMatch`, `ifNoneMatch`, `ifModifiedSince`,
-   * and `ifUnmodifiedSince`. When the object hasn't changed, S3 may return a
-   * `304 Not Modified` response, which is treated as success.
+   * Succeeds with `200`, `206` for a `range`, and `304` when a condition
+   * says the object did not change. A missing object throws an `S3Error` with
+   * `status` `404` and `code` `"NotFound"`.
    *
-   * Accepts `200`, `206`, and `304` by default — a ranged HEAD answers `206` for
-   * the same reason a ranged GET does. Set `expectedStatus` to replace that list
-   * entirely.
-   *
-   * @param params - Request configuration including bucket and key.
+   * @param params - Key, and optionally conditions and request options.
+   * @returns The store's response, with no body.
+   * @throws {S3Error} When the store answers with a status not in `expectedStatus`.
+   * @throws {Error} When the request fails in transit on every attempt. Its `cause` is the last failure.
+   * @throws When `signal` aborts, the signal's reason.
    * @example
    * ```ts
-   * const response = await client.head({ bucket: "my-bucket", key: "hello.txt" });
-   * const exists = response.status === 200;
+   * const response = await client.head({ key: "hello.txt" });
+   * const size = Number(response.headers.get("content-length"));
    * ```
    */
   async head(params: HeadObjectParams): Promise<Response> {
@@ -200,31 +219,26 @@ export class S3Client {
   }
 
   /**
-   * Uploads an object using PUT semantics. The content type is the caller's
-   * `contentType`, else a `content-type` header, else the body's own type,
-   * and only then inferred from the key by the configured resolver.
+   * Writes an object, replacing any object with the same key.
    *
-   * Supports optional conditional headers (`ifMatch`, `ifNoneMatch`) for conditional
-   * overwrites. Note that not all S3-compatible providers support these headers.
-   * When a condition fails, the `412 Precondition Failed` is raised as an
-   * {@link S3Error}.
+   * The content type is `contentType`, else a `content-type` header, else the
+   * body's own type, else the one the client infers from the key. Pass
+   * `ifNoneMatch: "*"` to write only if no object exists yet, or `ifMatch`
+   * with an ETag to overwrite only that version. A failed condition throws an
+   * `S3Error` with `status` `412`.
    *
-   * Accepts `200` by default. Set `expectedStatus` to replace that list
-   * entirely — stores that answer `201` to a PUT need it.
-   *
-   * `contentLength` declares the body's size, and is what makes a streamed
-   * upload work everywhere: a stream with no length goes out as
-   * `Transfer-Encoding: chunked`, which RustFS and AWS S3 refuse with `411
-   * MissingContentLength`, while a declared length is sent fixed-length
-   * instead. It is signed along with everything else, so a value that does not
-   * match the body is not a rounding error: the request is either rejected for
-   * a bad signature or hangs and surfaces as a bare `fetch failed`. Pass the
-   * byte length of the body or nothing at all.
-   *
-   * @param params - Upload configuration including payload and metadata.
+   * @param params - Key, body, and optionally metadata, conditions and request options.
+   * @returns The store's response.
+   * @throws {TypeError} When the body is an object `fetch` cannot send, such as a `Map`, or a `ReadableStream` the runtime cannot stream.
+   * @throws {Error} When a checksum is required and the body cannot be hashed.
+   * @throws {S3Error} When the store answers with a status not in `expectedStatus`.
+   * @throws {Error} When the request fails in transit on every attempt. Its `cause` is the last failure.
+   * @throws When `signal` aborts, the signal's reason.
    * @example
    * ```ts
-   * await client.put({ bucket: "my-bucket", key: "hello.txt", body: "Hello, world!" });
+   * await client.put({ key: "hello.txt", body: "Hello, world!" });
+   * await client.put({ key: "data.json", body: { hello: "world" } });
+   * await client.put({ key: "big.bin", body: stream, contentLength: size });
    * ```
    */
   async put(params: PutObjectParams): Promise<Response> {
@@ -261,13 +275,16 @@ export class S3Client {
   }
 
   /**
-   * Deletes an object. Treats both 200 and 204 responses as success; set
-   * `expectedStatus` to replace that list entirely.
+   * Deletes an object. Deleting a key that does not exist succeeds too.
    *
-   * @param params - Request configuration including bucket and key.
+   * @param params - Key and request options.
+   * @returns The store's response.
+   * @throws {S3Error} When the store answers with a status not in `expectedStatus`.
+   * @throws {Error} When the request fails in transit on every attempt. Its `cause` is the last failure.
+   * @throws When `signal` aborts, the signal's reason.
    * @example
    * ```ts
-   * await client.del({ bucket: "my-bucket", key: "hello.txt" });
+   * await client.del({ key: "hello.txt" });
    * ```
    */
   async del(params: DeleteObjectParams): Promise<Response> {
@@ -278,26 +295,25 @@ export class S3Client {
   }
 
   /**
-   * Lists objects using the ListObjectsV2 API and parses a convenient result
-   * structure for contents and common prefixes.
+   * Lists the objects of a bucket, one page at a time.
    *
-   * Pagination follows `nextContinuationToken` while `isTruncated` is `true`.
-   * A store that ignores `list-type=2` and answers V1-style instead reports
-   * `nextMarker` and no token; that value goes back as `query: { marker }`, not
-   * as `continuationToken` — see {@link ListObjectsV2Response.nextMarker}.
+   * While `isTruncated` is `true`, pass `nextContinuationToken` back as
+   * `continuationToken` for the next page. A store that pages the older (V1)
+   * way reports `nextMarker` instead: pass it back as `query: { marker }`.
    *
-   * Every entry the store lists is returned, and a listing that cannot be read
-   * is raised as an {@link S3Error} rather than trimmed. A listing the store
-   * url-encoded (`query: { "encoding-type": "url" }`) is decoded, so keys read
-   * the same either way. Typed parameters replace any namesake in `query`.
-   *
-   * @param params - Listing options such as prefix, delimiter, and pagination.
+   * @param params - Prefix, delimiter, paging and request options.
+   * @returns The objects and common prefixes of the page.
+   * @throws {S3Error} When the store answers with an error, or with a document that is not a listing.
+   * @throws {Error} When the request fails in transit on every attempt. Its `cause` is the last failure.
+   * @throws When `signal` aborts, the signal's reason.
    * @example
    * ```ts
-   * const result = await client.list({ bucket: "my-bucket", prefix: "uploads/" });
-   * for (const obj of result.contents) {
-   *   console.log(obj.key, obj.size);
-   * }
+   * let token: string | undefined;
+   * do {
+   *   const page = await client.list({ prefix: "photos/", continuationToken: token });
+   *   for (const object of page.contents) console.log(object.key, object.size);
+   *   token = page.nextContinuationToken;
+   * } while (token);
    * ```
    */
   async list(params: ListObjectsV2Params = {}): Promise<ListObjectsV2Response> {
@@ -338,19 +354,22 @@ export class S3Client {
   }
 
   /**
-   * Generates a SigV4 presigned URL for the provided method and object key.
+   * Creates a presigned URL: a link that authorizes one method on one object
+   * until it expires, with no other credentials. Nothing is sent to the store.
    *
-   * Purely local: nothing is sent, so `expectedStatus` and `signal` have no
-   * effect here — whoever later fetches the URL owns the response.
+   * The URL works as a plain link, in an `<img>`, or with `curl`. Headers you
+   * pass in `headers` are signed, and whoever uses the URL must send them with
+   * the same values. A presigned `PUT` accepts any body.
    *
-   * @param params - Method, bucket/key, expiry, and optional overrides.
+   * @param params - Method, key, expiry and optional headers or query.
+   * @returns The presigned URL.
    * @throws {RangeError} When `expiresInSeconds` is not an integer from 1 to 604800.
+   * @throws {Error} When the client has no credentials.
    * @example
    * ```ts
    * const url = await client.getSignedUrl({
    *   method: "GET",
-   *   bucket: "my-bucket",
-   *   key: "hello.txt",
+   *   key: "report.pdf",
    *   expiresInSeconds: 3600,
    * });
    * ```
@@ -389,16 +408,18 @@ export class S3Client {
   }
 
   /**
-   * Starts a multipart upload and returns an upload ID for use with
-   * {@link uploadPart} and {@link completeMultipart}.
+   * Starts a multipart upload, for objects too large for one `put`. Upload
+   * the parts with `uploadPart`, then call `completeMultipart`, or
+   * `abortMultipart` to discard them.
    *
-   * @param params - Multipart initiation options including bucket, key, and optional metadata.
+   * @param params - Key, and optionally metadata and request options.
+   * @returns The upload's ID.
+   * @throws {S3Error} When the store answers with an error, or with a document that names no upload.
+   * @throws {Error} When the request fails in transit on every attempt. Its `cause` is the last failure.
+   * @throws When `signal` aborts, the signal's reason.
    * @example
    * ```ts
-   * const { uploadId } = await client.initiateMultipart({
-   *   bucket: "my-bucket",
-   *   key: "large-file.bin",
-   * });
+   * const { uploadId } = await client.initiateMultipart({ key: "video.mp4" });
    * ```
    */
   async initiateMultipart(params: MultipartInitParams): Promise<MultipartInitResult> {
@@ -452,28 +473,25 @@ export class S3Client {
   }
 
   /**
-   * Uploads a single part of a multipart upload. Returns the ETag required
-   * by {@link completeMultipart} to assemble the final object.
+   * Uploads one part of a multipart upload. Parts can be uploaded in any
+   * order and in parallel. On AWS S3, every part but the last must be at least
+   * 5 MiB.
    *
-   * The part body is a payload like any other, so a configured `checksum`
-   * applies to it exactly as it does to {@link put}: the header is computed and
-   * signed when the body can be buffered, and with `requireOnPut` a body that
-   * cannot be — a stream, or one over 16 MiB — is refused rather than sent
-   * unchecked.
+   * With a checksum configured, the part carries one, and the result returns
+   * it for `completeMultipart`.
    *
-   * `contentLength` is a hint for stores that demand an explicit
-   * `Content-Length`, and it is signed along with everything else. A value that
-   * does not match the body is therefore not a rounding error: the request is
-   * either rejected for a bad signature or hangs and surfaces as a bare
-   * `fetch failed`. Pass the byte length of the body or nothing at all.
-   *
-   * @param params - Part upload options including uploadId, partNumber, and body.
+   * @param params - Upload ID, part number, body and request options.
+   * @returns The part's ETag, and its checksum when one is configured.
+   * @throws {RangeError} When `partNumber` is not an integer from 1 to 10000.
+   * @throws {Error} When a checksum is required and the body cannot be hashed.
+   * @throws {S3Error} When the store answers with a status not in `expectedStatus`.
+   * @throws {Error} When the request fails in transit on every attempt. Its `cause` is the last failure.
+   * @throws When `signal` aborts, the signal's reason.
    * @example
    * ```ts
-   * const { etag } = await client.uploadPart({
-   *   bucket: "my-bucket",
-   *   key: "large-file.bin",
-   *   uploadId: "abc123",
+   * const part = await client.uploadPart({
+   *   key: "video.mp4",
+   *   uploadId,
    *   partNumber: 1,
    *   body: chunk,
    * });
@@ -536,28 +554,27 @@ export class S3Client {
   }
 
   /**
-   * Completes a multipart upload by assembling previously uploaded parts.
+   * Completes a multipart upload: the store assembles the parts into the
+   * object. Takes the parts as `uploadPart` resolved them, in any order.
    *
-   * Supports optional conditional headers (`ifMatch`, `ifNoneMatch`) for conditional
-   * overwrites. Note that not all S3-compatible providers support these headers.
-   * When a condition fails, the `412 Precondition Failed` is raised as an
-   * {@link S3Error}.
+   * S3 can report a failure inside a `200` on this call, so the response body
+   * is checked, and an error found there is thrown, or retried when it is
+   * transient. A failed `ifMatch` or `ifNoneMatch` throws an `S3Error` with
+   * `status` `412`.
    *
-   * S3 can report a failure inside a `200` on this call, so the response body is
-   * read before anything is believed. An error found there is raised like any
-   * other, and retried when it is transient.
-   *
-   * @param params - Configuration for completing the multipart upload.
+   * @param params - Upload ID, parts, and optionally conditions and request options.
+   * @returns The object's ETag, and its URL when the store reports one.
+   * @throws {RangeError} When a part number is not an integer from 1 to 10000.
+   * @throws {Error} When `parts` is empty or repeats a part number.
+   * @throws {S3Error} When the store answers with an error, in a `200` or not.
+   * @throws {Error} When the request fails in transit on every attempt. Its `cause` is the last failure.
+   * @throws When `signal` aborts, the signal's reason.
    * @example
    * ```ts
    * const { etag } = await client.completeMultipart({
-   *   bucket: "my-bucket",
-   *   key: "large-file.bin",
-   *   uploadId: "abc123",
-   *   parts: [
-   *     { partNumber: 1, etag: "etag1" },
-   *     { partNumber: 2, etag: "etag2" },
-   *   ],
+   *   key: "video.mp4",
+   *   uploadId,
+   *   parts: [part1, part2],
    * });
    * ```
    */
@@ -606,17 +623,15 @@ export class S3Client {
   }
 
   /**
-   * Cancels an in-progress multipart upload, freeing any already-uploaded parts
-   * on the server.
+   * Aborts a multipart upload, and the store discards its parts.
    *
-   * @param params - Abort options including bucket, key, and uploadId.
+   * @param params - Upload ID and request options.
+   * @throws {S3Error} When the store answers with a status not in `expectedStatus`.
+   * @throws {Error} When the request fails in transit on every attempt. Its `cause` is the last failure.
+   * @throws When `signal` aborts, the signal's reason.
    * @example
    * ```ts
-   * await client.abortMultipart({
-   *   bucket: "my-bucket",
-   *   key: "large-file.bin",
-   *   uploadId: "abc123",
-   * });
+   * await client.abortMultipart({ key: "video.mp4", uploadId });
    * ```
    */
   async abortMultipart(params: AbortMultipartParams): Promise<void> {
@@ -678,9 +693,8 @@ export class S3Client {
     });
 
     /*
-     * Applied here, before signing, so the length the store reads is one the
-     * signature covers — the same placement, and the same reasoning, as
-     * `uploadPart`.
+     * Set before signing, so the length the store reads is one the signature
+     * covers, as in `uploadPart`.
      */
     if (typeof options.contentLength === "number") {
       headers.set("content-length", String(options.contentLength));
@@ -770,10 +784,9 @@ export class S3Client {
     const credentials = await this.resolveCredentials();
     const unsignedPayload = shouldUseUnsignedPayload(context.method, context.body);
     /*
-     * The query is re-encoded once, before the first signature: from here on the
-     * bytes on the wire are the bytes the signer canonicalizes. Running it later
-     * or twice would be harmless — decode-then-encode is a round trip — but
-     * every parameter is already in place by now.
+     * The query is re-encoded once, before the first signature, so the bytes on
+     * the wire are the bytes the signer canonicalizes. Every parameter is in
+     * place by now.
      */
     finalizeQuery(context.url);
     const streamedBody = hasBody(context.method) && isPayloadStream(context.body ?? null);
@@ -823,9 +836,8 @@ export class S3Client {
          * Required by the Fetch standard whenever the body is a stream, and
          * enforced by undici, Deno, Bun and workerd alike: without it the
          * `Request` constructor throws `duplex option is required` and nothing
-         * is ever sent. Set only for a stream body — it is invalid otherwise —
-         * and cast narrowly because the option is still missing from some
-         * `RequestInit` typings.
+         * is ever sent. Set only for a stream body, where it is valid, and cast
+         * narrowly because some `RequestInit` typings lack the option.
          */
         (init as RequestInit & { duplex: "half" }).duplex = "half";
       }
@@ -834,8 +846,8 @@ export class S3Client {
 
       /*
        * One attempt ends in exactly one of two ways: a response the caller
-       * expected, or a failure — an unexpected response turned into an
-       * `S3Error`, or whatever the transport threw. The retry decision is made
+       * expected, or a failure, which is an unexpected response turned into an
+       * `S3Error` or whatever the transport threw. The retry decision is made
        * once, below, about that one failure.
        */
       let response: Response | undefined;
@@ -994,13 +1006,12 @@ export class S3Client {
    * Adopts the endpoint's clock, but only when the difference is big enough to
    * be one.
    *
-   * Only a real response reaches here — a `fetch` that never completed throws
-   * long before, so a dead connection or a DNS failure cannot move the signing
-   * clock. Of the responses that do arrive, a `Date` header is a second-
-   * resolution stamp of when the answer was generated, not when it landed, so
-   * some difference is always measured and adopting each one made the clock
-   * wander for no reason. Worse, any intermediary that answers at all — a
-   * proxy, a captive portal, an error page — could shift every later signature.
+   * Only a real response reaches here: a `fetch` that never completed throws
+   * first, so a dead connection or a DNS failure cannot move the signing clock.
+   * A `Date` header is a second-resolution stamp of when the answer was
+   * generated, so some difference is always measured, and any intermediary
+   * that answers (a proxy, a captive portal, an error page) sends one too. A
+   * small difference is therefore ignored.
    *
    * The threshold is AWS's own rule: a signature is valid for fifteen minutes,
    * corrections start at five, and anything under that is latency rather than
@@ -1036,7 +1047,7 @@ export class S3Client {
     }
 
     /*
-     * A stream body is spent by the attempt that sent it — there is nothing
+     * A stream body is spent by the attempt that sent it. There is nothing
      * left to put in a second request, and building one would fail with a "body
      * already used" `TypeError` that buries the error actually worth reporting.
      * This sits ahead of `retriable` deliberately: the predicate decides policy,
@@ -1059,7 +1070,7 @@ export class S3Client {
      * Eligibility is about the body, not the method: every operation the
      * client issues is safe to repeat once its body can be sent again, which
      * the stream check above already settled. What remains is whether the
-     * failure is transient — a response says so through its status and code,
+     * failure is transient: a response says so through its status and code,
      * and a request that never got one failed in transit.
      */
     if (response) {
@@ -1542,7 +1553,7 @@ function buildError(response: Response, text: string | undefined): S3Error {
 
 /**
  * The S3 code a status stands for, for an error that came without a document
- * to name it — every `HEAD` among them.
+ * to name it, such as every `HEAD`.
  */
 const STATUS_CODES: Record<number, string> = {
   301: "PermanentRedirect",
@@ -1853,13 +1864,11 @@ function parseListObjectsV2(xml: string): ListObjectsV2Response {
   const isTruncated = extractTag(xml, "IsTruncated") === "true";
   const nextContinuationToken = extractTag(xml, "NextContinuationToken") || undefined;
   /*
-   * A store that answers V1 semantics — several S3-compatible ones do, ignoring
-   * `list-type=2` outright — says "there is more" with `<NextMarker>` and never
-   * sends a continuation token. Surfaced under its own name rather than folded
-   * into `nextContinuationToken`, because the two are not interchangeable: a
-   * marker has to go back as `marker`, and quietly sending it as
-   * `continuation-token` would be ignored by the store that asked for it — the
-   * same page forever, wearing the fix's clothes.
+   * A store that ignores `list-type=2` answers with V1 paging: it says "there
+   * is more" with `<NextMarker>` and never sends a continuation token. The
+   * marker keeps its own name, because the two are not interchangeable: a
+   * marker goes back as `marker`, and a store ignores it as
+   * `continuation-token`, serving the same page again.
    */
   let nextMarker = extractTag(xml, "NextMarker");
   nextMarker = nextMarker ? name(nextMarker) : undefined;
@@ -1891,7 +1900,7 @@ function parseListObjectsV2(xml: string): ListObjectsV2Response {
  *
  * The open-tag pattern tolerates attributes: `<Key>` and `<Key xmlns:x="…">`
  * are the same element, and a namespace declaration on it is not a different
- * one. It still will not match a longer name — `<KeyCount>` is not a `<Key>` —
+ * one. It does not match a longer name, `<KeyCount>` is not a `<Key>`,
  * because an attribute has to be separated by whitespace.
  */
 function extractTag(section: string, tag: string): string | undefined {
@@ -1945,17 +1954,16 @@ const MAX_CODE_POINT = 0x10_ff_ff;
 /**
  * Decodes the entities an S3 response can contain, in a single pass.
  *
- * Single-pass is the whole design. Sequential replaces cascade, and decoding
- * `&amp;` first — as this used to — feeds its own output to the passes after
- * it: the text `&amp;lt;`, which is how a key containing the four characters
- * `&lt;` is escaped, came back out as `<`. Here every reference is resolved
+ * Single-pass is the whole design. Sequential replaces cascade: decoding
+ * `&amp;` first feeds its own output to the passes after it, so the text
+ * `&amp;lt;`, which is how a key containing the four characters `&lt;` is
+ * escaped, would come back out as `<`. Here every reference is resolved
  * once and never re-read, so `&amp;` is no more special than `&gt;` is.
  *
  * Numeric character references are decoded too, decimal and hexadecimal alike.
  * They are not exotic: SeaweedFS escapes the quotes around an ETag as `&#34;`,
- * which the old decoder left in place, so a listed etag never matched the one
- * a HEAD reported. Anything unrecognised or outside Unicode is left exactly as
- * written — a malformed reference is not worth failing a listing over.
+ * and only a decoded one matches the ETag a HEAD reports. Anything unrecognised or outside Unicode is left exactly as
+ * written: a malformed reference is not worth failing a listing over.
  */
 function decodeXml(value: string): string {
   return value.replace(XML_ENTITY, (reference: string, body: string) => {
