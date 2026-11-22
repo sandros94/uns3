@@ -406,6 +406,12 @@ export interface PresignParams extends BaseRequest {
   expiresInSeconds?: number;
 }
 
+/**
+ * File extensions, without the dot, mapped to the media type each stands for.
+ * What `createContentTypeResolver` from `uns3/mime` is built from.
+ */
+export type MimeTable = Readonly<Record<string, string>>;
+
 /** Resolves a content type from an object key and an optional explicit value. Return `undefined` to omit the header. */
 export type ContentTypeResolver = (key: string, explicit?: string | false) => string | undefined;
 
