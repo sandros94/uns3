@@ -143,7 +143,11 @@ export interface S3ClientConfig {
   bucketStyle?: BucketStyle;
   /** Custom `fetch` implementation; defaults to the global `fetch`. */
   fetch?: typeof fetch;
-  /** Custom resolver for deriving content types from object keys. */
+  /**
+   * Infers a content type from an object key. Defaults to the `common` group
+   * from `uns3/mime`. Build one from the groups a bucket holds with
+   * `createContentTypeResolver`.
+   */
   contentTypeResolver?: ContentTypeResolver;
   /** Manual clock skew offset in milliseconds applied to request signatures. */
   clockSkewMs?: number;

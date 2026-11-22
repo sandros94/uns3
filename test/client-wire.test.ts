@@ -17,6 +17,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { presignUrl } from "../src/core.ts";
 import { S3Client } from "../src/index.ts";
+import { createContentTypeResolver } from "../src/mime.ts";
+import { document } from "../src/mime/document.ts";
 import { BUCKET, clientAnswering, credentials } from "./_client.ts";
 
 const LIST_XML = `<?xml version="1.0" encoding="UTF-8"?>
@@ -425,6 +427,24 @@ describe("request bytes", () => {
       await client.put(params);
       return requests[0]!.headers.get("content-type");
     };
+
+    it("infers only the common types unless given a resolver", async () => {
+      const body = new Uint8Array([1]);
+      await expect(sent({ bucket: BUCKET, key: "photo.png", body })).resolves.toBe("image/png");
+      await expect(sent({ bucket: BUCKET, key: "book.epub", body })).resolves.toBeNull();
+    });
+
+    it("infers from the groups a resolver was built from", async () => {
+      const { client, requests } = clientAnswering(() => new Response(null, { status: 200 }), {
+        contentTypeResolver: createContentTypeResolver(document),
+      });
+
+      await client.put({ bucket: BUCKET, key: "book.epub", body: new Uint8Array([1]) });
+      await client.put({ bucket: BUCKET, key: "photo.png", body: new Uint8Array([1]) });
+
+      expect(requests[0]!.headers.get("content-type")).toBe("application/epub+zip");
+      expect(requests[1]!.headers.get("content-type")).toBeNull();
+    });
 
     it("keeps a content-type header over the one the key suggests", async () => {
       await expect(

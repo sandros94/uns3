@@ -3,15 +3,15 @@ import {
   buildRequestUrl,
   applyQuery,
   createHeaders,
-  defaultContentTypeResolver,
   finalizeQuery,
   presignUrl,
-  resolveContentType,
   send,
   signRequest,
   isPayloadStream,
 } from "./core.ts";
 import type { SigningKeyCache } from "./core.ts";
+import { createContentTypeResolver } from "./mime.ts";
+import { common } from "./mime/common.ts";
 import type {
   Methods,
   ContentTypeResolver,
@@ -70,6 +70,9 @@ interface PerformContext {
   timeoutMs: number | false;
 }
 
+/** What a client infers content types from unless given a resolver of its own. */
+const commonContentTypes = /* @__PURE__ */ createContentTypeResolver(common);
+
 const DEFAULT_RETRY_CONFIG: Required<Omit<RetryConfig, "retriable">> = {
   maxAttempts: 3,
   baseDelayMs: 100,
@@ -123,7 +126,7 @@ export class S3Client {
     this.credentials = config.credentials;
     this.defaultBucket = config.defaultBucket;
     this.fetcher = config.fetch ?? globalFetch() ?? missingFetch();
-    this.contentTypeResolver = config.contentTypeResolver ?? defaultContentTypeResolver;
+    this.contentTypeResolver = config.contentTypeResolver ?? commonContentTypes;
     this.checksumConfig = config.checksum ? { ...config.checksum } : { algorithm: "none" };
     this.retryConfig = normalizeRetryConfig(config.retry);
     const signingKeyCache = config.signingKeyCache;
@@ -893,10 +896,10 @@ export class S3Client {
     const { key, contentType } = params;
     if (contentType === false) return undefined;
     if (contentType !== undefined) {
-      return resolveContentType(key, contentType, this.contentTypeResolver);
+      return this.contentTypeResolver(key, contentType);
     }
     if (new Headers(params.headers).has("content-type")) return undefined;
-    return ownType || resolveContentType(key, undefined, this.contentTypeResolver);
+    return ownType || this.contentTypeResolver(key, undefined);
   }
 
   private resolveBucket(bucket: string | undefined): string {

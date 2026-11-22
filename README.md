@@ -68,7 +68,8 @@ Other options:
 - `clockSkewMs`: an offset added to the local clock when signing. The client also corrects itself once the store's clock is five minutes or more away.
 - `retry` and `timeoutMs`: see [Retries and timeouts](#retries-and-timeouts).
 - `signingKeyCache`: where derived signing keys are kept, so a request costs one HMAC instead of five. Every client shares `sharedSigningKeyCache` by default. Pass a `SigningKeyCache` of its own to isolate a tenant, a department or a single request (`new SigningKeyCache({ size })`, 16 keys by default), or `false` to derive a key for every request. Each entry keeps the secret it was derived from for as long as it lives, so `delete(accessKeyId)` a revoked key, or `clear()` the cache, the shared one included.
-- `fetch` and `contentTypeResolver` replace the global `fetch` and the extension-based content type lookup.
+- `fetch` replaces the global `fetch`.
+- `contentTypeResolver`: how a content type is inferred from a key, see [Content types](#content-types).
 
 ### Methods
 
@@ -144,6 +145,23 @@ console.log("Size:", response.headers.get("content-length"));
 Uploads an object to an S3 bucket. The `body` can be a `string`, `Blob`, `ArrayBuffer`, `Uint8Array`, or a `ReadableStream`.
 
 The content type is taken from `contentType`, else from a `content-type` header, else from the body itself (a Blob's type, or JSON for a plain object), and only then inferred from the key's extension. `contentType: false` sends none at all.
+
+**Content types**
+
+A client infers content types from a small set of common formats by default: web pages and their assets, common images, audio and video, PDFs and archives. For anything else, build a resolver from the groups your bucket holds, so the bundle carries only those tables:
+
+```typescript
+import { createContentTypeResolver } from "uns3/mime";
+import { image } from "uns3/mime/image";
+import { data } from "uns3/mime/data";
+
+const client = new S3Client({
+  endpoint,
+  contentTypeResolver: createContentTypeResolver(image, data, { heic: "image/heic" }),
+});
+```
+
+The groups are `common`, `web`, `image`, `audio`, `video`, `font`, `document`, `data`, `archive`, `model`, and `all`, which holds every group plus the long tail of IANA-registered types. A later table wins over an earlier one, and your own entries are a table like any other.
 
 ```typescript
 // Upload from a string

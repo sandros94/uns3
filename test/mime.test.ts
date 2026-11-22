@@ -28,6 +28,7 @@ describe("createContentTypeResolver", () => {
 
     expect(resolve("photos/2024/Holiday.PNG")).toBe("image/png");
     expect(resolve("archive.tar.jpg")).toBe("image/jpeg");
+    expect(resolve("notes#1.jpg?.png")).toBe("image/png");
   });
 
   it("infers nothing it was not given", () => {

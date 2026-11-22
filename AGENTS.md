@@ -37,23 +37,23 @@ The package has three export paths defined in `package.json`:
 
 - `.` → `src/index.ts` — re-exports `S3Client`, `S3Error`, `SigningKeyCache`, `sharedSigningKeyCache`, all types, and `utils` namespace
 - `./core` → `src/core.ts` — re-exports low-level internal core modules (signer, serializer, endpoint, transport, content-type, defaults)
-- `./utils` → `src/utils.ts` — re-exports utility functions (MIME lookup, URI encoding, type guards)
+- `./utils` → `src/utils.ts` — re-exports utility functions (URI encoding, type guards)
 
 ### Key modules
 
 - **`src/client.ts`** — `S3Client` class: high-level API (get, head, put, del, list, multipart, presigned URLs). Contains all retry logic, clock skew correction, checksum computation (SHA-256, CRC32C), and XML parsing for S3 responses. This is the largest file.
 - **`src/error.ts`** — `S3Error` class with structured S3-specific error metadata (status, code, requestId, retriable, retryAfter, region).
 - **`src/types.ts`** — All TypeScript interfaces and type definitions.
+- **`src/mime.ts`** — `createContentTypeResolver(...tables)` and the `common` group. `S3Client` infers from `common` by default.
+- **`src/mime/*.ts`** — frozen extension-to-type tables, one per group (`common`, `web`, `image`, `audio`, `video`, `font`, `document`, `data`, `archive`, `model`), each exported by name and as the default. `all` spreads every group over the long tail of IANA-registered types. Values are the IANA-registered type, or the de facto one where none exists or clients only recognize another.
 
 ### Internal modules (`src/internal/`)
 
 - **`core/signer.ts`** — AWS SigV4 request signing and presigned URL generation using Web Crypto HMAC-SHA256.
 - **`core/endpoint.ts`** — URL construction supporting both virtual-hosted and path-style bucket addressing, with DNS compatibility checks.
 - **`core/serializer.ts`** — Header building (conditional headers, range, cache-control), query parameter application, stream detection.
-- **`core/content-type.ts`** — Content-type resolution from file extensions using the built-in MIME table.
 - **`core/transport.ts`** — Thin fetch wrapper.
 - **`core/defaults.ts`** — Constants (disallowed error headers).
-- **`utils/mime.ts`** — Embedded MIME type lookup table (ported from mrmime).
 - **`utils/encode.ts`** — RFC 3986 URI encoding.
 - **`utils/is.ts`** — Runtime-safe type guards for ArrayBuffer, Blob, ReadableStream, DNS-compatible bucket names, plain objects.
 
