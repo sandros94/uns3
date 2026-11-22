@@ -18,7 +18,7 @@
  * is the leg that holds the client to a production store.
  */
 
-import { GenericContainer, Wait, getContainerRuntimeClient } from "testcontainers";
+import { GenericContainer, Wait } from "testcontainers";
 import type { StartedTestContainer, WaitStrategy } from "testcontainers";
 import { signRequest } from "../../src/signer.ts";
 import { S3Client } from "../../src/index.ts";
@@ -176,20 +176,6 @@ export const STORES: Record<StoreName, ContainerStoreSpec> = {
 /** Every valid `UNS3_TEST_STORES` name, in the order they run by default. */
 export const STORE_NAMES: StoreName[] = Object.keys(STORES) as StoreName[];
 
-/**
- * Whether there is a container runtime to start a store in.
- *
- * Probed once, at import, through testcontainers' own client rather than by
- * shelling out to `docker`: it is the very discovery the containers will use, so
- * a `true` here means the socket they need is really reachable — including the
- * rootless, Podman and Colima layouts that a bare `docker version` misses, and
- * excluding a `docker` binary on `PATH` that has nothing behind it.
- */
-export const HAS_CONTAINER_RUNTIME: boolean = await getContainerRuntimeClient().then(
-  () => true,
-  () => false,
-);
-
 /** A store that is serving, and where the test process reaches it. */
 export interface StartedStore {
   /** Host-side endpoint, on whatever port the runtime happened to publish. */
@@ -278,11 +264,6 @@ function requiredEnv(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is required when UNS3_TEST_ENDPOINT is set.`);
   return value;
-}
-
-/** Whether this run can reach every selected store. */
-export function canRun(stores: StoreSpec[]): boolean {
-  return HAS_CONTAINER_RUNTIME || stores.every((spec) => spec.kind === "external");
 }
 
 /** Gets a store serving: starts and readies a container, or takes the external one as it is. */

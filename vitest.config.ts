@@ -12,13 +12,6 @@ export default defineConfig({
     coverage: {
       exclude: ["dist/**", "test/**", "build.config.ts", "vitest.config.ts"],
     },
-    /*
-     * Three suites, deliberately separate. `unit` is the fast one and needs
-     * nothing but a process; `integration` starts a real S3-compatible store in
-     * a container and skips itself when there is no container runtime to start
-     * it in. `browser` runs a stream upload in real browser engines against a
-     * local echo server, and needs Playwright's browser binaries installed.
-     */
     projects: [
       {
         extends: true,

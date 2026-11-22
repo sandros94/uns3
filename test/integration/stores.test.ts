@@ -18,7 +18,6 @@ import { S3Error } from "../../src/index.ts";
 import type { S3Client } from "../../src/index.ts";
 import {
   bytesOf,
-  canRun,
   clientFor,
   countingBytes,
   discard,
@@ -51,7 +50,7 @@ const TAIL_PART_BYTES = 1024;
 
 const SELECTED = selectedStores();
 
-describe.skipIf(!canRun(SELECTED)).each(SELECTED)("$name", (spec: StoreSpec) => {
+describe.each(SELECTED)("$name", (spec: StoreSpec) => {
   let store: StartedStore;
   let client: S3Client;
 

@@ -91,9 +91,6 @@ jobs:
         run: pnpm build
 
   integration:
-    # The real-store battery. Each store is a container the suite starts itself
-    # via testcontainers, so the matrix only has to name which one to run; with
-    # no container runtime the suite skips rather than fails.
     runs-on: ubuntu-latest
 
     strategy:
