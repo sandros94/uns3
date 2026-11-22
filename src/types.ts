@@ -1,4 +1,4 @@
-import type { SigningKeyCache } from "./internal/core/signer.ts";
+import type { SigningKeyCache } from "./signer.ts";
 
 export type UppercaseOrLowercase<T extends string> = Uppercase<T> | Lowercase<T>;
 export type Methods = UppercaseOrLowercase<"GET" | "HEAD" | "POST" | "PUT" | "DELETE">;
@@ -418,17 +418,3 @@ export type MimeTable = Readonly<Record<string, string>>;
 
 /** Resolves a content type from an object key and an optional explicit value. Return `undefined` to omit the header. */
 export type ContentTypeResolver = (key: string, explicit?: string | false) => string | undefined;
-
-/** Options passed to the transport layer when executing a request. */
-export interface TransportOptions {
-  /** The fully-constructed `Request` object to send. */
-  request: Request;
-  /** Optional abort signal forwarded to `fetch`. */
-  signal?: AbortSignal;
-}
-
-/** Response returned by the transport layer. */
-export interface TransportResult {
-  /** The raw `Response` object from `fetch`. */
-  response: Response;
-}

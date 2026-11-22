@@ -2,10 +2,9 @@ import { createHash, createHmac } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SigningKeyCache, presignUrl, sharedSigningKeyCache, signRequest } from "../../src/core.ts";
-import * as root from "../../src/index.ts";
-import { S3Client } from "../../src/index.ts";
-import type { Credentials } from "../../src/types.ts";
+import { S3Client } from "../src/index.ts";
+import { SigningKeyCache, presignUrl, sharedSigningKeyCache, signRequest } from "../src/signer.ts";
+import type { Credentials } from "../src/types.ts";
 
 const credentials: Credentials = {
   accessKeyId: "AKIDEXAMPLE",
@@ -20,6 +19,17 @@ describe("signer", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("returns the URL it signed, with the query encoded as it was signed", async () => {
+    /* `URLSearchParams` writes a space as `+` and a tilde as `%7E`, which SigV4 does not sign. */
+    const url = new URL("https://my-bucket.s3.us-east-1.amazonaws.com/a.txt");
+    url.searchParams.set("note", "a b~");
+
+    const result = await signRequest({ method: "GET", url, credentials, region: "us-east-1" });
+
+    expect(result.url.search).toBe("?note=a%20b~");
+    expect(url.search).toBe("?note=a+b%7E");
   });
 
   it("produces deterministic authorization headers", async () => {
@@ -444,11 +454,6 @@ describe("signing key caches", () => {
     await client.get({ bucket: "my-bucket", key: "a.txt" });
 
     expect(importKey).toHaveBeenCalled();
-  });
-
-  it("is exported from the package root as the same class and shared cache", () => {
-    expect(root.SigningKeyCache).toBe(SigningKeyCache);
-    expect(root.sharedSigningKeyCache).toBe(sharedSigningKeyCache);
   });
 
   it("knows the hash of an empty payload without computing it", async () => {

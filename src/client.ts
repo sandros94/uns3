@@ -1,15 +1,18 @@
+import { buildRequestUrl } from "./endpoint.ts";
+import { S3Error } from "./error.ts";
 import {
-  DISALLOWED_ERROR_HEADERS,
-  buildRequestUrl,
+  isArrayBuffer,
+  isArrayBufferView,
+  isBlob,
+  isPlainObject,
+  isReadableStream,
+} from "./internal/is.ts";
+import {
   applyQuery,
   createHeaders,
   finalizeQuery,
-  presignUrl,
-  send,
-  signRequest,
   isPayloadStream,
-} from "./core.ts";
-import type { SigningKeyCache } from "./core.ts";
+} from "./internal/serializer.ts";
 import { createContentTypeResolver } from "./mime.ts";
 import { common } from "./mime/common.ts";
 import type {
@@ -36,14 +39,8 @@ import type {
   UploadPartParams,
   UploadPartResult,
 } from "./types.ts";
-import { S3Error } from "./error.ts";
-import {
-  isArrayBuffer,
-  isArrayBufferView,
-  isBlob,
-  isPlainObject,
-  isReadableStream,
-} from "./utils.ts";
+import { presignUrl, signRequest } from "./signer.ts";
+import type { SigningKeyCache } from "./signer.ts";
 
 interface RequestOptions {
   /** Whether the request moves object bytes, which gives it no default deadline. */
@@ -72,6 +69,14 @@ interface PerformContext {
 
 /** What a client infers content types from unless given a resolver of its own. */
 const commonContentTypes = /* @__PURE__ */ createContentTypeResolver(common);
+
+/** Headers left out of an error's `cause`: they describe the body, which the error already read. */
+const DISALLOWED_ERROR_HEADERS = /* @__PURE__ */ new Set([
+  "content-length",
+  "content-encoding",
+  "content-language",
+  "transfer-encoding",
+]);
 
 const DEFAULT_RETRY_CONFIG: Required<Omit<RetryConfig, "retriable">> = {
   maxAttempts: 3,
@@ -837,7 +842,7 @@ export class S3Client {
       let failure: unknown;
       try {
         abort.arm(context.timeoutMs);
-        ({ response } = await send({ request, signal: abort.signal }, this.fetcher));
+        response = await this.fetcher(request, { signal: abort.signal });
 
         this.updateClockSkew(response);
 

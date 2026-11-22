@@ -10,8 +10,8 @@ export default defineBuildConfig({
       type: "bundle",
       input: [
         "./src/index.ts",
-        "./src/core.ts",
-        "./src/utils.ts",
+        "./src/signer.ts",
+        "./src/endpoint.ts",
         "./src/mime.ts",
         ...readdirSync("./src/mime").map((file) => `./src/mime/${file}`),
       ],

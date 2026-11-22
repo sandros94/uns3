@@ -33,33 +33,36 @@ Releases go through `uppt` (`.github/workflows/release.yml`): a release PR on pu
 
 ### Entry points and exports
 
-The package has three export paths defined in `package.json`:
+One module per subpath, so a consumer downloads what it imports and nothing else. `test/exports.test.ts` pins each entry's runtime exports and the `package.json` exports map: anything not listed there is internal.
 
-- `.` → `src/index.ts` — re-exports `S3Client`, `S3Error`, `SigningKeyCache`, `sharedSigningKeyCache`, all types, and `utils` namespace
-- `./core` → `src/core.ts` — re-exports low-level internal core modules (signer, serializer, endpoint, transport, content-type, defaults)
-- `./utils` → `src/utils.ts` — re-exports utility functions (URI encoding, type guards)
+- `.` → `src/index.ts` — `S3Client`, `S3Error`, and every public type
+- `./signer` → `src/signer.ts` — `signRequest`, `presignUrl`, `SigningKeyCache`, `sharedSigningKeyCache`
+- `./endpoint` → `src/endpoint.ts` — `buildRequestUrl`, `encodeS3Key`
+- `./mime` → `src/mime.ts` — `createContentTypeResolver`, `common`
+- `./mime/*` → `src/mime/*.ts` — one extension-to-type table per group
+- `./package.json`
 
-### Key modules
+Every module imports the module it needs directly, never a barrel: rolldown chunks by which entries reach a module, so a barrel import makes everything it re-exports look reached.
+
+### Modules
 
 - **`src/client.ts`** — `S3Client` class: high-level API (get, head, put, del, list, multipart, presigned URLs). Contains all retry logic, clock skew correction, checksum computation (SHA-256, CRC32C), and XML parsing for S3 responses. This is the largest file.
 - **`src/error.ts`** — `S3Error` class with structured S3-specific error metadata (status, code, requestId, retriable, retryAfter, region).
 - **`src/types.ts`** — All TypeScript interfaces and type definitions.
+- **`src/signer.ts`** — AWS SigV4 request signing and presigned URLs using Web Crypto HMAC-SHA256, and the `SigningKeyCache` derived keys are kept in. `signRequest` returns the URL it signed, its query encoded the way it was signed.
+- **`src/endpoint.ts`** — URL construction for virtual-hosted and path-style addressing, with DNS compatibility checks.
 - **`src/mime.ts`** — `createContentTypeResolver(...tables)` and the `common` group. `S3Client` infers from `common` by default.
 - **`src/mime/*.ts`** — frozen extension-to-type tables, one per group (`common`, `web`, `image`, `audio`, `video`, `font`, `document`, `data`, `archive`, `model`), each exported by name and as the default. `all` spreads every group over the long tail of IANA-registered types. Values are the IANA-registered type, or the de facto one where none exists or clients only recognize another.
 
-### Internal modules (`src/internal/`)
+### Internal modules (`src/internal/`, never exported)
 
-- **`core/signer.ts`** — AWS SigV4 request signing and presigned URL generation using Web Crypto HMAC-SHA256.
-- **`core/endpoint.ts`** — URL construction supporting both virtual-hosted and path-style bucket addressing, with DNS compatibility checks.
-- **`core/serializer.ts`** — Header building (conditional headers, range, cache-control), query parameter application, stream detection.
-- **`core/transport.ts`** — Thin fetch wrapper.
-- **`core/defaults.ts`** — Constants (disallowed error headers).
-- **`utils/encode.ts`** — RFC 3986 URI encoding.
-- **`utils/is.ts`** — Runtime-safe type guards for ArrayBuffer, Blob, ReadableStream, DNS-compatible bucket names, plain objects.
+- **`serializer.ts`** — Header building (conditional headers, range, cache-control), query parameter application, `finalizeQuery`, stream detection.
+- **`encode.ts`** — RFC 3986 URI encoding.
+- **`is.ts`** — Runtime-safe type guards for ArrayBuffer, Blob, ReadableStream, IP addresses, DNS-compatible bucket names, plain objects.
 
 ### Build
 
-Uses `obuild` with rolldown in `neutral` platform mode. Three bundle entry points: `index.ts`, `core.ts`, `utils.ts`. Output goes to `dist/` as `.mjs` files.
+Uses `obuild` with rolldown in `neutral` platform mode. One bundle entry per subpath: `index.ts`, `signer.ts`, `endpoint.ts`, `mime.ts` and every file in `src/mime/`. Output goes to `dist/` as `.mjs` files, shared code in `dist/_chunks/`.
 
 ## Conventions
 

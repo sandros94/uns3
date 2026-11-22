@@ -1,7 +1,7 @@
-import type { Credentials, Methods } from "../../types.ts";
-import { uriEncode } from "../utils/encode.ts";
-import { isArrayBuffer, isArrayBufferView, isBlob, isReadableStream } from "../utils/is.ts";
-import { finalizeQuery } from "./serializer.ts";
+import { uriEncode } from "./internal/encode.ts";
+import { isArrayBuffer, isArrayBufferView, isBlob, isReadableStream } from "./internal/is.ts";
+import { finalizeQuery } from "./internal/serializer.ts";
+import type { Credentials, Methods } from "./types.ts";
 
 const encoder = new TextEncoder();
 const SERVICE = "s3";
@@ -26,6 +26,12 @@ export interface SignRequestInput {
 
 /** Result of a SigV4 signing operation, containing the signed headers and associated metadata. */
 export interface SignRequestResult {
+  /**
+   * The URL that was signed, with its query encoded the way SigV4 signs it.
+   * Send this one: `URLSearchParams` writes a space as `+` and a tilde as
+   * `%7E`, which a store that recomputes the signature rejects.
+   */
+  url: URL;
   headers: Headers;
   payloadHash: string;
   amzDate: string;
@@ -67,8 +73,9 @@ export async function signRequest(input: SignRequestInput): Promise<SignRequestR
   const date = input.datetime ?? new Date();
   const { amzDate, shortDate } = formatAmzDate(date);
   const headers = cloneHeaders(input.headers);
+  const url = finalizeQuery(new URL(input.url));
 
-  ensureHost(headers, input.url);
+  ensureHost(headers, url);
   headers.set("x-amz-date", amzDate);
 
   if (credentials.sessionToken) {
@@ -81,7 +88,7 @@ export async function signRequest(input: SignRequestInput): Promise<SignRequestR
   const { canonical, signedHeaders } = canonicalizeHeaders(headers);
   const canonicalRequest = buildCanonicalRequest(
     input.method,
-    input.url,
+    url,
     canonical,
     signedHeaders,
     payloadHash,
@@ -107,6 +114,7 @@ export async function signRequest(input: SignRequestInput): Promise<SignRequestR
   headers.set("authorization", authorization);
 
   return {
+    url,
     headers,
     payloadHash,
     amzDate,
@@ -138,7 +146,7 @@ export async function presignUrl(input: PresignInput): Promise<PresignResult> {
   const credentialScope = `${shortDate}/${region}/${SERVICE}/aws4_request`;
   const credential = `${credentials.accessKeyId}/${credentialScope}`;
 
-  const presignedUrl = new URL(input.url.toString()); // Prevent mutation
+  const presignedUrl = new URL(input.url);
   const search = presignedUrl.searchParams;
   search.set("X-Amz-Algorithm", "AWS4-HMAC-SHA256");
   search.set("X-Amz-Credential", credential);

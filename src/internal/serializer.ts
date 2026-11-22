@@ -1,6 +1,6 @@
-import type { BaseRequest, ByteRange, PutObjectParams } from "../../types.ts";
-import { encodeQueryString } from "../utils/encode.ts";
-import { isReadableStream } from "../utils/is.ts";
+import type { BaseRequest, ByteRange, PutObjectParams } from "../types.ts";
+import { encodeQueryString } from "./encode.ts";
+import { isReadableStream } from "./is.ts";
 
 export interface HeaderBuildOptions {
   headers?: HeadersInit;

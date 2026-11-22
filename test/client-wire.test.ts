@@ -15,7 +15,7 @@ import { createHash, createHmac } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { presignUrl } from "../src/core.ts";
+import { presignUrl } from "../src/signer.ts";
 import { S3Client } from "../src/index.ts";
 import { createContentTypeResolver } from "../src/mime.ts";
 import { document } from "../src/mime/document.ts";

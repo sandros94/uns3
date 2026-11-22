@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyQuery, createHeaders, finalizeQuery } from "../../src/core.ts";
+import { applyQuery, createHeaders, finalizeQuery } from "../../src/internal/serializer.ts";
 
 describe("serializer helpers", () => {
   it("merges headers and metadata", () => {

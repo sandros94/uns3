@@ -20,7 +20,7 @@
 
 import { GenericContainer, Wait, getContainerRuntimeClient } from "testcontainers";
 import type { StartedTestContainer, WaitStrategy } from "testcontainers";
-import { signRequest } from "../../src/core.ts";
+import { signRequest } from "../../src/signer.ts";
 import { S3Client } from "../../src/index.ts";
 import type { BucketStyle, Credentials, PutObjectParams, S3ClientConfig } from "../../src/index.ts";
 
